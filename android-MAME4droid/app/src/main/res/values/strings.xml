@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- App -->
-    <string name="app_name" translatable="false">MAME4droid (Current)</string>
+    <string name="app_name" translatable="false">TapMame</string>
     <string name="mame_version" translatable="false">0.288</string>
     <string name="label_settings">MAME4droid Settings</string>
     <string name="label_help">MAME4droid Help</string>

@@ -374,6 +374,10 @@ public class EmulatorViewGL extends GLSurfaceView implements IEmuView {
 		if (mm == null) {
 			// If the app isn't ready, use default dimensions.
 			setMeasuredDimension(widthMeasureSpec, heightMeasureSpec);
+		} else if (mm.getPrefsHelper() != null && mm.getPrefsHelper().isSbsEnabled()) {
+			// TapMame: SBS spans the whole panel — left half is the left eye,
+			// right half its duplicate. Scaling happens inside the eye.
+			setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec));
 		} else {
 			// If ready, ask the MainHelper to calculate the optimal dimensions.
 			ArrayList<Integer> l = mm.getMainHelper().measureWindow(widthMeasureSpec, heightMeasureSpec, scaleType);
@@ -388,7 +392,10 @@ public class EmulatorViewGL extends GLSurfaceView implements IEmuView {
 	@Override
 	protected void onSizeChanged(int w, int h, int oldw, int oldh) {
 		super.onSizeChanged(w, h, oldw, oldh);
-		Emulator.setWindowSize(w, h);
+		// TapMame: in SBS the emulator lays out for one eye (half width); the
+		// renderer duplicates the eye across the panel.
+		boolean sbs = mm == null || mm.getPrefsHelper() == null || mm.getPrefsHelper().isSbsEnabled();
+		Emulator.setWindowSize(sbs ? w / 2 : w, h);
 	}
 
 	/**

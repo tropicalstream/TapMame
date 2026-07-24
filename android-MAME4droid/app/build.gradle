@@ -17,7 +17,7 @@ android {
 	}
 
     defaultConfig {
-        applicationId "com.seleuco.mame4d2024"
+        applicationId "com.tapmame"
         minSdkVersion 29
         targetSdkVersion 36
         versionCode 131
@@ -75,11 +75,13 @@ android {
 		}
     }
 
-    externalNativeBuild {
-        ndkBuild {
-            path file('src/main/jni/Android.mk')
-        }
-    }
+    /* TapMame: native libs are prebuilt (upstream v1.37.6 release) in jniLibs;
+       no NDK needed. Re-enable to rebuild the JNI shim from src/main/jni. */
+    //externalNativeBuild {
+    //    ndkBuild {
+    //        path file('src/main/jni/Android.mk')
+    //    }
+    //}
 
     namespace = 'com.seleuco.mame4droid'
 

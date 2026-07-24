@@ -1,0 +1,6 @@
+
+# TapMame: prebuilt MAME core (348MB, fetched by fetch_core.sh; GitHub rejects >100MB)
+android-MAME4droid/app/src/main/jniLibs/
+android-MAME4droid/local.properties
+android-MAME4droid/app/build/
+android-MAME4droid/.gradle/

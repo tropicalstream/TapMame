@@ -298,6 +298,11 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 		return PreferenceManager.getDefaultSharedPreferences(context);
 	}
 
+	/** TapMame: X3 Pro binocular side-by-side presentation (on by default on glasses). */
+	public boolean isSbsEnabled() {
+		return getSharedPreferences().getBoolean("PREF_TAPMAME_SBS", true);
+	}
+
 	public boolean isBitmapFiltering() {
 		return getSharedPreferences().getBoolean(PREF_BITMAP_FILTERING, true);
 	}
@@ -342,6 +347,9 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	}
 
 	public boolean isPortraitTouchController() {
+		// TapMame: no on-screen touch controller on the glasses — input comes
+		// from the companion phone / paired controllers.
+		if (isSbsEnabled()) return false;
 		return getSharedPreferences().getBoolean(PREF_PORTRAIT_TOUCH_CONTROLLER, true);
 	}
 
@@ -350,6 +358,7 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	}
 
 	public boolean isLandscapeTouchController() {
+		if (isSbsEnabled()) return false;
 		return getSharedPreferences().getBoolean(PREF_LANDSCAPE_TOUCH_CONTROLLER, true);
 	}
 
@@ -821,7 +830,10 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	}
 
 	public boolean isShadersEnabled() {
-		return getSharedPreferences().getBoolean(PREF_SHADERS_ENABLED, false);
+		// TapMame: forced ON — the X3 Pro is a GLES 3.2 device and the SBS
+		// binocular presentation lives in the GLES3 native renderer, so the
+		// legacy GLES1 path must never be selected on the glasses.
+		return true;
 	}
 
 	public boolean isScrapingEnabled() {

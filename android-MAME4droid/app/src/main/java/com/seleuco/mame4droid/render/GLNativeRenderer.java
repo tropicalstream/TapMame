@@ -303,6 +303,8 @@ public final class GLNativeRenderer implements Renderer, IGLRenderer {
 	public void onSurfaceCreated(GL10 gl, EGLConfig config) {
 		//Call JNI method to do initialization stuff
 		Log.d("GLRENDERER", "onSurfaceCreated called");
+		// TapMame: the previous context's eye-copy objects died with it
+		eyeTex = 0; eyeFbo = 0; eyeW = 0; eyeH = 0;
 		Emulator.newRenderer();
 		// register the GL thread with ADPF and re-arm pacing so the NEW surface
 		// gets its frame-rate vote again (no-op if pacing off / <API31)
@@ -313,10 +315,49 @@ public final class GLNativeRenderer implements Renderer, IGLRenderer {
 		}
 	}
 
+	// TapMame: X3 Pro binocular SBS. The physical 1280x480 panel maps its left
+	// half to the left eye and right half to the right eye, so both eyes must
+	// receive the same 640x480 image. The native renderer learns the view size
+	// from the CURRENT GL viewport (glGetIntegerv(GL_VIEWPORT)), so declaring a
+	// half-width viewport makes MAME lay out and render entirely into the left
+	// eye; after each native frame the left half is blitted to the right half.
+	private int surfW = 0, surfH = 0;
+	private int blitErrLogged = 0;
+	private int eyeTex = 0, eyeFbo = 0, eyeW = 0, eyeH = 0;
+
+	/** (Re)create the eye-copy texture + FBO for the current context/size. */
+	private void ensureEyeCopy(int w, int h) {
+		if (eyeTex != 0 && eyeW == w && eyeH == h) return;
+		int[] id = new int[1];
+		if (eyeTex != 0) { id[0] = eyeTex; android.opengl.GLES30.glDeleteTextures(1, id, 0); }
+		if (eyeFbo != 0) { id[0] = eyeFbo; android.opengl.GLES30.glDeleteFramebuffers(1, id, 0); }
+		android.opengl.GLES30.glGenTextures(1, id, 0); eyeTex = id[0];
+		android.opengl.GLES30.glBindTexture(android.opengl.GLES30.GL_TEXTURE_2D, eyeTex);
+		android.opengl.GLES30.glTexImage2D(android.opengl.GLES30.GL_TEXTURE_2D, 0,
+			android.opengl.GLES30.GL_RGBA, w, h, 0,
+			android.opengl.GLES30.GL_RGBA, android.opengl.GLES30.GL_UNSIGNED_BYTE, null);
+		android.opengl.GLES30.glTexParameteri(android.opengl.GLES30.GL_TEXTURE_2D,
+			android.opengl.GLES30.GL_TEXTURE_MIN_FILTER, android.opengl.GLES30.GL_NEAREST);
+		android.opengl.GLES30.glTexParameteri(android.opengl.GLES30.GL_TEXTURE_2D,
+			android.opengl.GLES30.GL_TEXTURE_MAG_FILTER, android.opengl.GLES30.GL_NEAREST);
+		android.opengl.GLES30.glGenFramebuffers(1, id, 0); eyeFbo = id[0];
+		android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_FRAMEBUFFER, eyeFbo);
+		android.opengl.GLES30.glFramebufferTexture2D(android.opengl.GLES30.GL_FRAMEBUFFER,
+			android.opengl.GLES30.GL_COLOR_ATTACHMENT0,
+			android.opengl.GLES30.GL_TEXTURE_2D, eyeTex, 0);
+		android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_FRAMEBUFFER, 0);
+		eyeW = w; eyeH = h;
+	}
+
+	private boolean sbs() {
+		return prefsHelper == null || prefsHelper.isSbsEnabled();
+	}
+
 	@Override
 	public void onSurfaceChanged(GL10 gl, int w, int h) {
-		Log.d("GLRENDERER", "onSurfaceChanged called");
-		GLES20.glViewport(0, 0, w, h);
+		Log.i("TAPMAME_SBS", "onSurfaceChanged " + w + "x" + h + " sbs=" + sbs());
+		surfW = w; surfH = h;
+		GLES20.glViewport(0, 0, sbs() ? w / 2 : w, h);
 		//This is called when you exit from the Preferences screen
 		updateShaderEffect();
 	}
@@ -326,9 +367,35 @@ public final class GLNativeRenderer implements Renderer, IGLRenderer {
 		//Call JNI method to do GLES rendering on native side
 		// timed for ADPF: excludes eglSwapBuffers (done after we return), so
 		// no vsync wait pollutes the GL work sample
+		final boolean sbs = sbs() && surfW > 0;
+		if (sbs) GLES20.glViewport(0, 0, surfW / 2, surfH);
 		long t0 = System.nanoTime();
 		int res = Emulator.onDrawFrame(Emulator.RENDERER_GL_NATIVE, isHdr? maxnits : 0);
 		if (res != -1) Emulator.reportGlRenderNs(System.nanoTime() - t0);
+		if (res != -1 && sbs) {
+			// Duplicate the rendered left eye into the right eye. The driver
+			// rejects default-FB self-blit (GL_INVALID_OPERATION), so route
+			// through a texture: copy the left half into eyeTex, then blit
+			// eyeTex's FBO into the right half. MAME's UI can leave scissor
+			// enabled, which would clip both steps — disable it first.
+			int w2 = surfW / 2;
+			android.opengl.GLES30.glDisable(android.opengl.GLES30.GL_SCISSOR_TEST);
+			ensureEyeCopy(w2, surfH);
+			android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_READ_FRAMEBUFFER, 0);
+			android.opengl.GLES30.glBindTexture(android.opengl.GLES30.GL_TEXTURE_2D, eyeTex);
+			android.opengl.GLES30.glCopyTexSubImage2D(android.opengl.GLES30.GL_TEXTURE_2D, 0, 0, 0, 0, 0, w2, surfH);
+			android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_READ_FRAMEBUFFER, eyeFbo);
+			android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_DRAW_FRAMEBUFFER, 0);
+			android.opengl.GLES30.glBlitFramebuffer(
+				0, 0, w2, surfH,
+				w2, 0, surfW, surfH,
+				android.opengl.GLES30.GL_COLOR_BUFFER_BIT,
+				android.opengl.GLES30.GL_NEAREST);
+			android.opengl.GLES30.glBindFramebuffer(android.opengl.GLES30.GL_FRAMEBUFFER, 0);
+			int err = android.opengl.GLES30.glGetError();
+			if (err != 0 && (blitErrLogged++ < 5))
+				Log.e("TAPMAME_SBS", "eye copy error 0x" + Integer.toHexString(err) + " surf " + surfW + "x" + surfH);
+		}
 		if(res==-1)
 		{
 			gl.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
