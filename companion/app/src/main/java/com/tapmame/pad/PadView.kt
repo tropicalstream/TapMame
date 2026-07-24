@@ -24,7 +24,8 @@ class PadView(
     context: Context,
     private val onMask: (Long) -> Unit,
     private val onAxis: (type: Int, x: Float, y: Float) -> Unit,
-    private val onMenu: () -> Unit
+    private val onMenu: () -> Unit,
+    private val onAction: (String) -> Unit   // "EXIT" | "MENU" service taps
 ) : View(context) {
 
     companion object {
@@ -44,6 +45,8 @@ class PadView(
         set(v) { field = v; postInvalidate() }
     var gameText = ""
         set(v) { field = v; postInvalidate() }
+    /** Vibrate on control presses (toggle in the ⚙ menu). */
+    var haptics = true
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f }
@@ -70,52 +73,91 @@ class PadView(
     private var btnLabels = arrayOf<String>()
     private val heldButtons = HashMap<Int, Long>()
 
-    // service + gear
+    // service + gear. COIN/START are momentary bitmask presses; EXIT and
+    // MENU are tap actions (EXIT gets a confirm on the phone, MENU opens
+    // the glasses' SBS menu). Order per Mars: COIN START EXIT MENU.
     private data class Svc(val label: String, val bit: Long, val rect: RectF = RectF())
-    private val svc = arrayOf(Svc("COIN", COIN), Svc("START", START), Svc("MENU", OPTION), Svc("EXIT", EXIT))
+    private val svc = arrayOf(Svc("COIN", COIN), Svc("START", START), Svc("EXIT", 0), Svc("MENU", 0))
     private val gearRect = RectF()
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) = relayout()
 
+    /**
+     * Ergonomic layout (thumb-zone research): in a two-handed grip the
+     * thumbs anchor at the BOTTOM corners and sweep comfortable arcs
+     * covering roughly the lower two-thirds of each half, so the stick and
+     * the fire fan sit low, anchored to their corners. Infrequent,
+     * deliberate controls (COIN/START/EXIT/MENU, gear) live along the TOP —
+     * the hardest-to-reach strip — so mid-game thumbs never hit them by
+     * accident. Both orientations use the same corner-anchor logic.
+     */
     private fun relayout() {
         val w = width.toFloat(); val h = height.toFloat()
-        val svcH = h * 0.14f; val svcW = w * 0.16f
+        if (w <= 0 || h <= 0) return
+        val portrait = h > w
+
+        // service strip along the top
+        val svcH = if (portrait) h * 0.07f else h * 0.14f
+        val gearW = svcH * 1.2f
+        gearRect.set(14f, 10f, 14f + gearW, svcH)
+        val left = gearRect.right + 12f
+        val svcW = (w - left - 14f - 3 * 10f) / 4f
         for ((i, s) in svc.withIndex()) {
-            val x = w * 0.5f + (i - 2) * (svcW + 12f) + 6f
+            val x = left + i * (svcW + 10f)
             s.rect.set(x, 10f, x + svcW, svcH)
         }
-        gearRect.set(14f, 10f, 14f + svcH * 1.2f, svcH)
 
         hasStick = profile.stick != "none"
         hasAnalog = profile.analog != "none" && profile.stick != "dual"
         analogTrackball = profile.analog == "trackball"
 
-        stickCx = w * 0.22f; stickCy = h * 0.60f; stickR = minOf(w, h) * 0.30f
+        // stick: anchored toward the bottom-left corner thumb arc
+        stickR = minOf(w, h) * (if (portrait) 0.20f else 0.28f)
+        stickCx = stickR + w * 0.04f
+        stickCy = h - stickR - h * (if (portrait) 0.05f else 0.08f)
 
         if (hasAnalog) {
-            // analog surface sits where the stick would be
-            val aw = w * 0.36f; val ah = h * 0.5f
-            analogRect.set(w * 0.04f, h * 0.32f, w * 0.04f + aw, h * 0.32f + ah)
+            val aw = if (portrait) w * 0.55f else w * 0.36f
+            val ah = if (portrait) h * 0.28f else h * 0.46f
+            analogRect.set(w * 0.04f, h - ah - h * 0.08f, w * 0.04f + aw, h - h * 0.08f)
         }
 
         btnLabels = profile.buttons.take(6).toTypedArray()
         btnCount = btnLabels.size
-        layoutButtons(w, h)
+        layoutButtons(w, h, portrait)
     }
 
-    private fun layoutButtons(w: Float, h: Float) {
+    /**
+     * Fire buttons fan along the right thumb's natural arc, anchored just
+     * off the bottom-right corner: button 0 (primary) closest to the resting
+     * thumb, later buttons stepping outward along the sweep; 4-6 buttons
+     * form a second, outer ring.
+     */
+    private fun layoutButtons(w: Float, h: Float, portrait: Boolean) {
         if (btnCount == 0) return
-        val r = (minOf(w, h) * 0.11f).coerceAtMost(w * 0.09f)
-        val cx = w * 0.76f; val cy = h * 0.56f
-        when (btnCount) {
-            1 -> place(0, cx, cy, r)
-            2 -> { place(0, cx - r * 1.3f, cy + r * 0.4f, r); place(1, cx + r * 1.3f, cy - r * 0.4f, r) }
-            3 -> for (i in 0 until 3) place(i, cx + (i - 1) * r * 2.4f, cy - (i - 1) * r * 0.5f, r)
-            else -> for (i in 0 until btnCount) {   // two staggered rows
-                val row = i / 3; val col = i % 3
-                place(i, cx + (col - 1) * r * 2.4f + row * r * 0.8f,
-                    cy + (row * 2 - 1) * r * 1.3f - col * r * 0.4f, r)
-            }
+        val m = minOf(w, h)
+        val r = (m * if (portrait) 0.075f else 0.105f).coerceAtLeast(56f)
+        val ax = w + r * 0.4f          // anchor: just outside bottom-right corner
+        val ay = h + r * 0.4f
+        val inner = m * (if (portrait) 0.33f else 0.52f)
+        val outer = inner + r * (if (portrait) 2.0f else 2.25f)
+        // angles measured from the corner: 0° = along the bottom edge,
+        // 90° = straight up; 20°..70° keeps the fan on-screen inside the
+        // thumb's sweep. The fan centres on the 45° diagonal (the resting
+        // thumb) and D/E/F sit on the SAME spokes outside A/B/C, so six
+        // buttons read as the classic two curved arcade rows.
+        val n1 = minOf(btnCount, 3)
+        val step = if (portrait) 28.0 else 25.0   // keep adjacent buttons clear
+        val start = 45.0 + (n1 - 1) * step / 2
+        for (i in 0 until n1) {
+            val a = Math.toRadians(start - i * step)
+            place(i, (ax - inner * kotlin.math.cos(a)).toFloat(),
+                     (ay - inner * kotlin.math.sin(a)).toFloat(), r)
+        }
+        for (i in 3 until btnCount) {
+            val a = Math.toRadians(start - (i - 3) * step)
+            place(i, (ax - outer * kotlin.math.cos(a)).toFloat(),
+                     (ay - outer * kotlin.math.sin(a)).toFloat(), r * 0.92f)
         }
     }
 
@@ -125,7 +167,7 @@ class PadView(
 
     override fun onDraw(c: Canvas) {
         c.drawColor(0xFF101418.toInt())
-        text.textSize = height * 0.045f; text.color = 0xFF9AA4AE.toInt()
+        text.textSize = minOf(width, height) * 0.032f; text.color = 0xFF9AA4AE.toInt()
         val line = buildString {
             append(statusText)
             if (gameText.isNotEmpty()) append("  ·  ").append(gameText)
@@ -221,13 +263,23 @@ class PadView(
     }
 
     private fun down(pid: Int, x: Float, y: Float) {
-        if (gearRect.contains(x, y)) { onMenu(); return }
-        for (s in svc) if (s.rect.contains(x, y)) { heldButtons[pid] = s.bit; push(); return }
-        for (i in 0 until btnCount) if (btnRects[i].contains(x, y)) { heldButtons[pid] = BTN[i]; push(); return }
-        if (hasAnalog && analogRect.contains(x, y)) { analogPointer = pid; updateAnalog(x, y); return }
+        if (gearRect.contains(x, y)) { buzz(); onMenu(); return }
+        for (s in svc) if (s.rect.contains(x, y)) {
+            buzz()
+            if (s.bit == 0L) onAction(s.label)          // EXIT (confirmed) / MENU
+            else { heldButtons[pid] = s.bit; push() }   // COIN / START
+            return
+        }
+        for (i in 0 until btnCount) if (btnRects[i].contains(x, y)) { buzz(); heldButtons[pid] = BTN[i]; push(); return }
+        if (hasAnalog && analogRect.contains(x, y)) { buzz(); analogPointer = pid; updateAnalog(x, y); return }
         if (hasStick && hypot(x - stickCx, y - stickCy) <= stickR * 1.35f) {
             stickPointer = pid; updateStick(x, y)
         }
+    }
+
+    private fun buzz() {
+        if (haptics) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY,
+            android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING)
     }
 
     private fun up(pid: Int) {
@@ -239,7 +291,9 @@ class PadView(
 
     private fun updateStick(x: Float, y: Float) {
         val dx = x - stickCx; val dy = y - stickCy
-        stickMask = if (hypot(dx, dy) < stickR * 0.18f) 0L else gate(dx, dy)
+        val m = if (hypot(dx, dy) < stickR * 0.18f) 0L else gate(dx, dy)
+        if (m != stickMask && m != 0L) buzz()   // tick on each new direction
+        stickMask = m
         push()
     }
 

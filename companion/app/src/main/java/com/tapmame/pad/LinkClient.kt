@@ -137,7 +137,9 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     line == "GAME" -> listener.onGame("")
                     line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
                     line.startsWith("NPADDR") -> listener.onNpAddr(line.removePrefix("NPADDR").trim())
-                    line.startsWith("OK gamemenu") || line.startsWith("OK settings") -> {}
+                    line.startsWith("OK gamemenu") || line.startsWith("OK settings")
+                        || line.startsWith("OK exitgame") || line.startsWith("OK menu")
+                        || line.startsWith("OK nethost") || line.startsWith("OK netjoin") -> {}
                     line.startsWith("OK ") -> listener.onRomResult(true, line.substring(3))
                     line.startsWith("ERR ") -> listener.onRomResult(false, line.substring(4))
                 }
@@ -165,6 +167,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     fun netHost() { if (running) outQueue.offer("CMD NETHOST") }
     fun netJoin(addr: String) { if (running) outQueue.offer("CMD NETJOIN $addr") }
     fun queryNpAddr() { if (running) outQueue.offer("NPADDR?") }
+    fun exitGame() { if (running) outQueue.offer("CMD EXITGAME") }
+    fun openGlassesMenu() { if (running) outQueue.offer("CMD MENU") }
     fun sendRom(name: String, size: Long, stream: InputStream) {
         if (running) outQueue.offer(RomJob(name, size, stream))
         else listener.onRomResult(false, "not connected")
