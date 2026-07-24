@@ -86,11 +86,26 @@ public final class TapNav {
 	 *                      (close any settings screen / open menu; never ESC
 	 *                       the machine list itself)
 	 */
+	// MAME's own quit prompt doesn't register as isInMenu(), so we track when
+	// we've raised it: while this window is open, the pad/glasses drive it with
+	// UI keys (arrows + ENTER) instead of feeding the game.
+	private static volatile long quitConfirmUntil = 0;
+	public static boolean inQuitConfirm() { return android.os.SystemClock.uptimeMillis() < quitConfirmUntil; }
+	public static void clearQuitConfirm() { quitConfirmUntil = 0; }
+
+	/** Raise MAME's in-frame "Are you sure you want to quit?" and arm nav for it. */
+	public static void exitGame(MAME4droid mm) {
+		GlassesUi ui = mm.getGlassesUi();
+		if (ui != null && ui.isMenuVisible()) mm.runOnUiThread(ui::hideMenu);
+		esc(mm);
+		quitConfirmUntil = android.os.SystemClock.uptimeMillis() + 15000;
+	}
+
 	public static void exit(MAME4droid mm) {
 		if (Emulator.isInGame()) {
-			// a single, both-eyes "Are you sure you want to quit?" confirm
-			GlassesUi ui = mm.getGlassesUi();
-			if (ui != null) mm.runOnUiThread(ui::showExitGameConfirm);
+			// ONE confirmation: MAME's own in-frame prompt (both eyes),
+			// answered by a glasses tap or the phone pad.
+			exitGame(mm);
 			return;
 		}
 		// not in a game: pop everything back to the frontend root
@@ -117,30 +132,20 @@ public final class TapNav {
 			android.view.InputDevice.SOURCE_KEYBOARD);
 	}
 
-	private static void mameKey(MAME4droid mm, int code) {
-		long t = android.os.SystemClock.uptimeMillis();
-		android.view.View v = mm.getEmuView();
-		com.seleuco.mame4droid.input.InputHandler ih = mm.getInputHandler();
-		if (ih == null || v == null) return;
-		ih.onKey(v, code, kev(t, android.view.KeyEvent.ACTION_DOWN, code));
-		ih.onKey(v, code, kev(t, android.view.KeyEvent.ACTION_UP, code));
+	/** Feed one key press+release into MAME through InputHandler.onKey. */
+	public static void mameKey(final MAME4droid mm, final int code) {
+		mm.runOnUiThread(() -> {
+			long t = android.os.SystemClock.uptimeMillis();
+			android.view.View v = mm.getEmuView();
+			com.seleuco.mame4droid.input.InputHandler ih = mm.getInputHandler();
+			if (ih == null || v == null) return;
+			ih.onKey(v, code, kev(t, android.view.KeyEvent.ACTION_DOWN, code));
+			ih.onKey(v, code, kev(t, android.view.KeyEvent.ACTION_UP, code));
+		});
 	}
 
 	/** ESC into MAME (raises the quit prompt on a running game / backs one UI level). */
 	public static void esc(final MAME4droid mm) {
-		mm.runOnUiThread(() -> mameKey(mm, android.view.KeyEvent.KEYCODE_ESCAPE));
-	}
-
-	/**
-	 * Quit the running game back to the machine-select list: ESC raises MAME's
-	 * quit prompt (Quit preselected), then — after a frame or two — ENTER
-	 * confirms it. Both go through onKey; verified to land on the game list.
-	 */
-	public static void quitToList(final MAME4droid mm) {
-		mm.runOnUiThread(() -> mameKey(mm, android.view.KeyEvent.KEYCODE_ESCAPE));
-		new Thread(() -> {
-			try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-			mm.runOnUiThread(() -> mameKey(mm, android.view.KeyEvent.KEYCODE_ENTER));
-		}, "TapNavQuit").start();
+		mameKey(mm, android.view.KeyEvent.KEYCODE_ESCAPE);
 	}
 }

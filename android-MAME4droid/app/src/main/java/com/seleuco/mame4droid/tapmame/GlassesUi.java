@@ -118,6 +118,8 @@ public class GlassesUi extends View {
 			it.add("Game Settings (DIPs, Inputs…)"); ac.add(() -> { hideMenu(); LinkServer.openGameMenu(mm); });
 			it.add("Load State");         ac.add(() -> { hideMenu(); loadOrSave(true); });
 			it.add("Save State");         ac.add(() -> { hideMenu(); loadOrSave(false); });
+			// raises MAME's own in-frame quit confirm (both eyes)
+			it.add("Exit Game");          ac.add(() -> { hideMenu(); TapNav.exitGame(mm); });
 		} else {
 			it.add("Close Menu");         ac.add(this::hideMenu);
 		}
@@ -138,18 +140,6 @@ public class GlassesUi extends View {
 			});
 	}
 
-	/** Leave the running game back to the game-select list (SBS confirm). */
-	public void showExitGameConfirm() {
-		// leave the game running behind this confirm (pauseGame=false) so Quit
-		// can ESC straight to the machine list
-		showMenu("ARE YOU SURE YOU WANT TO QUIT?",
-			new String[]{"Return to emulation", "Quit"},
-			new MenuAction[]{
-				this::hideMenu,                                  // back to the game
-				() -> { hideMenu(); TapNav.quitToList(mm); }     // ESC+ENTER -> game list
-			},
-			false);
-	}
 
 	private void loadOrSave(boolean load) {
 		Emulator.resume();
@@ -231,6 +221,10 @@ public class GlassesUi extends View {
 					if (menuVisible) {
 						MenuAction a = sel < actions.length ? actions[sel] : null;
 						if (a != null) a.run();
+					} else if (Emulator.isInGame() && TapNav.inQuitConfirm()) {
+						// MAME's quit prompt: tap = select (Quit / Return)
+						sendKey(KeyEvent.KEYCODE_ENTER);
+						TapNav.clearQuitConfirm();
 					} else if (!Emulator.isInGameButNotInMenu()) {
 						// frontend / MAME menu: tap = select (launch the game!)
 						sendKey(KeyEvent.KEYCODE_ENTER);
@@ -262,13 +256,9 @@ public class GlassesUi extends View {
 		if (a != null) a.run();
 	}
 
-	/** One key press into MAME (Android keycode; native maps to MAME UI). */
+	/** One key press into MAME via the reliable InputHandler.onKey path. */
 	private void sendKey(final int code) {
-		new Thread(() -> {
-			Emulator.setKeyData(code, Emulator.KEY_DOWN, (char) 0);
-			try { Thread.sleep(90); } catch (InterruptedException ignored) {}
-			Emulator.setKeyData(code, Emulator.KEY_UP, (char) 0);
-		}, "TapMameKey").start();
+		TapNav.mameKey(mm, code);
 	}
 
 	/**

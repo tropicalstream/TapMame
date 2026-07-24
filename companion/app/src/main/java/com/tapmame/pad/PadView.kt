@@ -278,15 +278,19 @@ class PadView(
         return true
     }
 
+    private val pressT = HashMap<Int, Long>()   // pointerId -> press uptime
+
     private fun down(pid: Int, x: Float, y: Float) {
         if (gearRect.contains(x, y)) { buzz(); onMenu(); return }
         for (s in svc) if (s.rect.contains(x, y)) {
             buzz()
             if (s.bit == 0L) onAction(s.label)          // EXIT (confirmed) / MENU
-            else { heldButtons[pid] = s.bit; push() }   // COIN / START
+            else { heldButtons[pid] = s.bit; pressT[pid] = android.os.SystemClock.uptimeMillis(); push() }
             return
         }
-        for (i in 0 until btnCount) if (btnRects[i].contains(x, y)) { buzz(); heldButtons[pid] = BTN[i]; push(); return }
+        for (i in 0 until btnCount) if (btnRects[i].contains(x, y)) {
+            buzz(); heldButtons[pid] = BTN[i]; pressT[pid] = android.os.SystemClock.uptimeMillis(); push(); return
+        }
         if (hasAnalog && analogRect.contains(x, y)) { buzz(); analogPointer = pid; updateAnalog(x, y); return }
         if (hasStick && hypot(x - stickCx, y - stickCy) <= stickR * 1.35f) {
             stickPointer = pid; updateStick(x, y)
@@ -301,6 +305,20 @@ class PadView(
     private fun up(pid: Int) {
         if (pid == stickPointer) { stickPointer = -1; stickMask = 0 }
         if (pid == analogPointer) { analogPointer = -1; releaseAnalog() }
+        // MAME samples input once per emulated frame plus network latency, so
+        // a very quick tap can slip through unseen (COIN/START felt "deaf").
+        // Enforce a minimum press: on an early release keep the bit latched
+        // and release it after the remainder.
+        val bit = heldButtons[pid]
+        val t0 = pressT.remove(pid)
+        if (bit != null && t0 != null) {
+            val held = android.os.SystemClock.uptimeMillis() - t0
+            val minHold = 140L
+            if (held < minHold) {
+                postDelayed({ heldButtons.remove(pid); push() }, minHold - held)
+                return
+            }
+        }
         heldButtons.remove(pid)
         push()
     }

@@ -208,15 +208,19 @@ public class LinkServer {
 					Emulator.setDigitalData(p, 0);
 					break;
 				}
-				// 3) game-select frontend -> stick moves the list, FIRE opens
-				if (!Emulator.isInGame()) {
-					if ((pressed & FIRE) != 0)
-						new Thread(() -> {
-							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ENTER, Emulator.KEY_DOWN, (char) 0);
-							try { Thread.sleep(90); } catch (InterruptedException ignored) {}
-							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ENTER, Emulator.KEY_UP, (char) 0);
-						}, "TapMameSelect").start();
-					// pass directions only (strip buttons) so the list scrolls
+				// 3) any MAME-drawn menu — the frontend list, the TAB menu, OR
+				//    the in-game quit prompt (which doesn't flag as isInMenu, so
+				//    inQuitConfirm() covers it): the joystick directions
+				//    navigate (as they do in the list), FIRE selects (ENTER —
+				//    the key MAME's UI-select honours), B backs out (ESC).
+				if (!Emulator.isInGame() || Emulator.isInMenu() || TapNav.inQuitConfirm()) {
+					if ((pressed & FIRE) != 0) {
+						TapNav.mameKey(mm, android.view.KeyEvent.KEYCODE_ENTER);
+						if (TapNav.inQuitConfirm()) TapNav.clearQuitConfirm();
+					}
+					if ((pressed & (1L << 11)) != 0)   // B = back
+						TapNav.mameKey(mm, android.view.KeyEvent.KEYCODE_ESCAPE);
+					// directions only (strip buttons) so the menu scrolls
 					Emulator.setDigitalData(p, mask & (UP | DOWN | LEFT | RIGHT));
 					break;
 				}
