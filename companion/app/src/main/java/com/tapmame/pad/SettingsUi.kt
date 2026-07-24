@@ -37,6 +37,13 @@ object SettingsUi {
     private val PROTO_L = listOf("IPv4", "IPv6", "Auto (IPv6 + IPv4)")
     private val PROTO_V = listOf("0", "1", "2")
 
+    private val DZ_L = listOf("Smallest", "Small", "Normal", "Large", "Largest")
+    private val DZ_V = listOf("1", "2", "3", "4", "5")
+    private val ADZ_L = listOf("Off", "Smallest", "Small", "Normal", "Large")
+    private val ADZ_V = listOf("0", "1", "2", "3", "4")
+    private val CPU_L = listOf("Auto", "1", "2", "3", "4")
+    private val CPU_V = listOf("-1", "1", "2", "3", "4")
+
     private val SECTIONS: List<Pair<String, List<Opt>>> = listOf(
         "Emulation" to listOf(
             ListOpt("PREF_EMU_SOUND", "Sound", SOUND_L, SOUND_V, "44100"),
@@ -44,9 +51,26 @@ object SettingsUi {
             BoolOpt("PREF_EMU_SHOW_FPS", "Show FPS", false),
             BoolOpt("PREF_EMU_AUTO_FRAMESKIP", "Auto frameskip", false),
             BoolOpt("PREF_FRAME_PACING", "Frame pacing", true),
+            BoolOpt("PREF_GLOBAL_AUTOSAVE", "Auto-save & resume games", false),
             BoolOpt("CHEATS", "Cheats", false),
             BoolOpt("PREF_HISCORE", "Save high scores", false),
             BoolOpt("SKIP_GAMEINFO", "Skip game-info screen", false)
+        ),
+        "Video" to listOf(
+            BoolOpt("PREF_BITMAP_FILTERING", "Smooth scaling (bilinear)", true),
+            BoolOpt("PREF_ZOOM_TO_WINDOW", "Zoom to window", true),
+            BoolOpt("PREF_TAPMAME_SBS", "SBS 3D output (both eyes)", true)
+        ),
+        "Performance" to listOf(
+            BoolOpt("PREF_SPEED_HACKS_2", "Speed hacks", false),
+            BoolOpt("PREF_EMU_DISABLE_DRC_4", "Disable DRC recompiler (compatibility)", false),
+            BoolOpt("PREF_EMU_DRC_USE_C_4", "DRC C backend (safer, slower)", false),
+            ListOpt("PREF_EMU_NUM_PROCESSORS", "CPU threads", CPU_L, CPU_V, "-1")
+        ),
+        "Input" to listOf(
+            BoolOpt("PREF_AUTOFIRE", "Autofire", false),
+            ListOpt("PREF_GAMEPAD_DZ", "Gamepad deadzone", DZ_L, DZ_V, "3"),
+            ListOpt("PREF_ANALOG_DZ", "Analog deadzone", ADZ_L, ADZ_V, "2")
         ),
         "Vector graphics" to listOf(
             BoolOpt("PREF_VECTOR_IMPROVED", "Improved vector glow", true),

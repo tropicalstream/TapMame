@@ -8,8 +8,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.widget.EditText
 import android.widget.Toast
+import kotlin.math.abs
 
 /**
  * TapMame Pad — the phone companion. Discovers the glasses on the LAN,
@@ -36,7 +40,7 @@ class MainActivity : Activity(), LinkClient.Listener {
         Controls.init(this)
         link = LinkClient(this, this)
         pad = PadView(this,
-            { mask -> link.sendPad(mask) },
+            { mask -> lastTouchMask = mask; link.sendPad(mask or btMask) },
             { type, x, y -> link.sendAxis(type, x, y) },
             { actionsDialog() },
             { label -> svcAction(label) })
@@ -52,6 +56,107 @@ class MainActivity : Activity(), LinkClient.Listener {
             "MENU" -> link.menu()
             "EXIT" -> link.exit()
         }
+    }
+
+    // -------------------------------------------- physical gamepad passthrough
+    // Any Bluetooth/USB controller paired to the PHONE drives the glasses
+    // automatically: its buttons merge into the same PAD bitmask the on-screen
+    // pad sends, and its left stick also rides the analog channel so paddle /
+    // dial / trackball games get true analog from a real stick.
+
+    private var btMask = 0L          // held bits from the physical controller
+    private var lastTouchMask = 0L   // held bits from the on-screen pad
+    private var btAxisX = 0f
+    private var btAxisY = 0f
+
+    private fun pushBt(m: Long) {
+        if (m == btMask) return
+        btMask = m
+        link.sendPad(lastTouchMask or btMask)
+    }
+
+    private fun keyBit(code: Int): Long = when (code) {
+        KeyEvent.KEYCODE_DPAD_UP -> PadView.UP
+        KeyEvent.KEYCODE_DPAD_DOWN -> PadView.DOWN
+        KeyEvent.KEYCODE_DPAD_LEFT -> PadView.LEFT
+        KeyEvent.KEYCODE_DPAD_RIGHT -> PadView.RIGHT
+        KeyEvent.KEYCODE_BUTTON_A -> PadView.BTN[0]
+        KeyEvent.KEYCODE_BUTTON_B -> PadView.BTN[1]
+        KeyEvent.KEYCODE_BUTTON_X -> PadView.BTN[2]
+        KeyEvent.KEYCODE_BUTTON_Y -> PadView.BTN[3]
+        KeyEvent.KEYCODE_BUTTON_L1 -> PadView.BTN[4]
+        KeyEvent.KEYCODE_BUTTON_R1 -> PadView.BTN[5]
+        KeyEvent.KEYCODE_BUTTON_START -> PadView.START
+        KeyEvent.KEYCODE_BUTTON_SELECT -> PadView.COIN
+        else -> 0L
+    }
+
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        val bit = keyBit(e.keyCode)
+        if (bit != 0L) {
+            if (e.repeatCount == 0) when (e.action) {
+                KeyEvent.ACTION_DOWN -> pushBt(btMask or bit)
+                KeyEvent.ACTION_UP -> pushBt(btMask and bit.inv())
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(e)
+    }
+
+    override fun onGenericMotionEvent(e: MotionEvent): Boolean {
+        if (e.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
+            && e.action == MotionEvent.ACTION_MOVE) {
+            val hx = e.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val hy = e.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            val sx = e.getAxisValue(MotionEvent.AXIS_X)
+            val sy = e.getAxisValue(MotionEvent.AXIS_Y)
+            // hat + left stick both count as the digital dpad (0.5 threshold)
+            var m = btMask and (PadView.UP or PadView.DOWN or PadView.LEFT or PadView.RIGHT).inv()
+            fun dir(v: Float, neg: Long, pos: Long) {
+                if (v < -0.5f) m = m or neg else if (v > 0.5f) m = m or pos
+            }
+            dir(hx, PadView.LEFT, PadView.RIGHT); dir(hy, PadView.UP, PadView.DOWN)
+            dir(sx, PadView.LEFT, PadView.RIGHT); dir(sy, PadView.UP, PadView.DOWN)
+            pushBt(m)
+            // the stick also feeds MAME's analog inputs (paddle/dial/wheel/…)
+            val ax = if (abs(sx) > 0.12f) sx else 0f
+            val ay = if (abs(sy) > 0.12f) sy else 0f
+            if (abs(ax - btAxisX) > 0.01f || abs(ay - btAxisY) > 0.01f) {
+                btAxisX = ax; btAxisY = ay
+                link.sendAxis(PadView.LEFT_STICK_DATA, ax, -ay)
+            }
+            return true
+        }
+        return super.onGenericMotionEvent(e)
+    }
+
+    // ------------------------------------------------- per-game layout choice
+
+    private fun layoutKey(rom: String?) = "layout." + (rom ?: "_default")
+
+    /** The pad profile to show: the player's forced preset, else the auto one. */
+    private fun effectiveProfile(rom: String?): ControlProfile {
+        val id = getSharedPreferences("pad", MODE_PRIVATE).getString(layoutKey(rom), "auto")
+        return Controls.preset(id) ?: Controls.forGame(rom)
+    }
+
+    private fun controllerDialog() {
+        val prefs = getSharedPreferences("pad", MODE_PRIVATE)
+        val rom = appliedRom
+        val key = layoutKey(rom)
+        val cur = prefs.getString(key, "auto")
+        val checked = Controls.PRESETS.indexOfFirst { it.first == cur }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Layout — " + (rom ?: "default") +
+                "\n(BT gamepads paired to the phone just work)")
+            .setSingleChoiceItems(Controls.PRESETS.map { it.second }.toTypedArray(), checked) { d, which ->
+                prefs.edit().putString(key, Controls.PRESETS[which].first).apply()
+                pad.profile = effectiveProfile(rom)
+                Toast.makeText(this, Controls.PRESETS[which].second, Toast.LENGTH_SHORT).show()
+                d.dismiss()
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private var lastGame: String? = null      // last raw GAME line, for dedupe
@@ -127,7 +232,7 @@ class MainActivity : Activity(), LinkClient.Listener {
             if (!padInit || target != appliedRom) {
                 padInit = true
                 appliedRom = target
-                pad.profile = Controls.forGame(target)
+                pad.profile = effectiveProfile(target)
             }
         }
     }
@@ -166,6 +271,7 @@ class MainActivity : Activity(), LinkClient.Listener {
         val hap = pad.haptics
         val items = arrayOf(
             "Settings…",
+            "Controller & layout…",
             "Game settings (DIPs, inputs) on glasses",
             "NetPlay: host — get invite code",
             "NetPlay: join — enter invite code",
@@ -180,24 +286,25 @@ class MainActivity : Activity(), LinkClient.Listener {
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> SettingsUi.show(this, link, prefCallbacks)
-                    1 -> link.openGameSettings()
-                    2 -> netHostFlow()
-                    3 -> netJoinFlow()
-                    4 -> pickRom()
-                    5 -> nasConnectDialog()
-                    6 -> {
+                    1 -> controllerDialog()
+                    2 -> link.openGameSettings()
+                    3 -> netHostFlow()
+                    4 -> netJoinFlow()
+                    5 -> pickRom()
+                    6 -> nasConnectDialog()
+                    7 -> {
                         // after uploading a ROM, this restarts the glasses app so
                         // MAME re-audits its rompath and the new game shows up
                         link.reloadGames()
                         Toast.makeText(this, "Reloading game list on glasses…", Toast.LENGTH_SHORT).show()
                     }
-                    7 -> {
+                    8 -> {
                         pad.haptics = !hap
                         getSharedPreferences("pad", MODE_PRIVATE).edit().putBoolean("haptics", pad.haptics).apply()
                         Toast.makeText(this, "Haptics ${if (pad.haptics) "on" else "off"}", Toast.LENGTH_SHORT).show()
                     }
-                    8 -> ipDialog()
-                    9 -> { link.disconnect(); link.startDiscovery() }
+                    9 -> ipDialog()
+                    10 -> { link.disconnect(); link.startDiscovery() }
                 }
             }.show()
     }

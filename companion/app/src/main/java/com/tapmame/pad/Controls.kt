@@ -20,6 +20,25 @@ data class ControlProfile(
 
 object Controls {
 
+    /**
+     * Layout presets the player can force for a game (Controller menu) when a
+     * better fit exists than the auto profile — id, label, profile (null =
+     * auto). The touchpad presets swap the stick for a full analog surface,
+     * which gives much finer control in paddle/dial games like Circus.
+     */
+    val PRESETS: List<Triple<String, String, ControlProfile?>> = listOf(
+        Triple("auto", "Auto — this game's own layout", null),
+        Triple("8way2", "8-way stick + 2 buttons", ControlProfile(2, "8way", listOf("A", "B"), "none", "forced layout")),
+        Triple("8way4", "8-way stick + 4 buttons", ControlProfile(2, "8way", listOf("A", "B", "C", "D"), "none", "forced layout")),
+        Triple("6btn", "6 buttons (fighting)", ControlProfile(2, "8way", listOf("LP", "MP", "HP", "LK", "MK", "HK"), "none", "forced layout")),
+        Triple("4way1", "4-way stick + 1 button (maze)", ControlProfile(2, "4way", listOf("A"), "none", "forced layout")),
+        Triple("2way2", "2-way stick + 2 buttons", ControlProfile(2, "2way", listOf("A", "B"), "none", "forced layout")),
+        Triple("paddle", "Touchpad paddle — fine analog control", ControlProfile(2, "none", listOf("A", "B"), "paddle", "slide on the pad for fine control")),
+        Triple("trackball", "Touchpad trackball", ControlProfile(2, "none", listOf("A", "B"), "trackball", "slide on the pad for fine control")),
+    )
+
+    fun preset(id: String?): ControlProfile? = PRESETS.firstOrNull { it.first == id }?.third
+
     private var db: JSONObject? = null
     private lateinit var fallback: ControlProfile
 
