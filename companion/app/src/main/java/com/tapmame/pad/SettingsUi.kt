@@ -132,24 +132,37 @@ object SettingsUi {
                 }
                 when (o) {
                     is BoolOpt -> {
-                        // toggle: label left, switch right — reads well in a row
+                        // A stock Switch renders nearly invisibly on this dark
+                        // dialog theme (the toggles looked like plain labels with
+                        // nothing to tap). Use a theme-proof, whole-row-tappable
+                        // control: label on the left, a bright ON/OFF on the right.
                         val row = LinearLayout(ctx).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
-                            setPadding(0, px(10), 0, px(10))
+                            setPadding(0, px(14), 0, px(14))
+                            isClickable = true
+                            isFocusable = true
                         }
                         row.addView(label().apply {
                             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                         })
-                        val sw = Switch(ctx)
-                        // setChecked fires the listener synchronously, so a
-                        // suppress flag keeps the load from echoing a SETPREF
-                        var suppress = false
-                        callbacks[o.key] = { v -> suppress = true; sw.isChecked = boolOf(v, o.def); suppress = false }
-                        sw.setOnCheckedChangeListener { _, c ->
-                            if (!suppress) write(o.key, "bool", if (c) "true" else "false")
+                        val state = TextView(ctx).apply {
+                            textSize = 16f
+                            setTypeface(typeface, android.graphics.Typeface.BOLD)
                         }
-                        row.addView(sw)
+                        var value = o.def
+                        fun render() {
+                            state.text = if (value) "ON" else "OFF"
+                            state.setTextColor(if (value) 0xFF43A047.toInt() else 0xFF6B7681.toInt())
+                        }
+                        render()
+                        callbacks[o.key] = { v -> value = boolOf(v, o.def); render() }
+                        row.setOnClickListener {
+                            value = !value
+                            render()
+                            write(o.key, "bool", if (value) "true" else "false")
+                        }
+                        row.addView(state)
                         root.addView(row)
                     }
                     is ListOpt -> {

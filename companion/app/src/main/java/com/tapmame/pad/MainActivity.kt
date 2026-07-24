@@ -151,8 +151,7 @@ class MainActivity : Activity(), LinkClient.Listener {
                 "\n(BT gamepads paired to the phone just work)")
             .setSingleChoiceItems(Controls.PRESETS.map { it.second }.toTypedArray(), checked) { d, which ->
                 prefs.edit().putString(key, Controls.PRESETS[which].first).apply()
-                pad.profile = effectiveProfile(rom)
-                Toast.makeText(this, Controls.PRESETS[which].second, Toast.LENGTH_SHORT).show()
+                pad.profile = effectiveProfile(rom)   // the pad reshapes + shows the note itself
                 d.dismiss()
             }
             .setNegativeButton("Close", null)
