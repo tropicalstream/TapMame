@@ -225,7 +225,9 @@ public class GlassesUi extends View {
 						MenuAction a = sel < actions.length ? actions[sel] : null;
 						if (a != null) a.run();
 					} else if (Emulator.isInGame() && TapNav.inQuitConfirm()) {
-						// MAME's quit prompt: tap = select (Quit / Return)
+						// MAME's quit prompt: tap = select (Quit / Return).
+						// resume() first — a paused machine can't process it
+						Emulator.resume();
 						sendKey(KeyEvent.KEYCODE_ENTER);
 						TapNav.clearQuitConfirm();
 					} else if (!Emulator.isInGameButNotInMenu()) {

@@ -71,6 +71,15 @@ public final class TapNav {
 		if (topIsSubScreen()) { top.runOnUiThread(top::finish); return; }
 		GlassesUi ui = mm.getGlassesUi();
 		if (ui != null && ui.isMenuVisible()) { mm.runOnUiThread(ui::hideMenu); return; }
+		// MENU while the quit prompt is up = cancel the prompt (back one level).
+		// It must NOT open the SBS menu here: that menu pauses the emulator, and
+		// a paused machine can't even draw the prompt — the player got stuck.
+		if (inQuitConfirm()) {
+			Emulator.resume();
+			esc(mm);              // ESC on the prompt = return to the game
+			clearQuitConfirm();
+			return;
+		}
 		if (Emulator.isInGame() && Emulator.isInMenu()) { esc(mm); return; }
 		if (ui != null) mm.runOnUiThread(ui::showMainMenu);
 	}
@@ -87,22 +96,42 @@ public final class TapNav {
 	 *                       the machine list itself)
 	 */
 	// MAME's own quit prompt doesn't register as isInMenu(), so we track when
-	// we've raised it: while this window is open, the pad/glasses drive it with
-	// UI keys (arrows + ENTER) instead of feeding the game.
-	private static volatile long quitConfirmUntil = 0;
-	public static boolean inQuitConfirm() { return android.os.SystemClock.uptimeMillis() < quitConfirmUntil; }
-	public static void clearQuitConfirm() { quitConfirmUntil = 0; }
+	// we've raised it: while armed, the pad/glasses drive it with UI keys
+	// (arrows + ENTER) instead of feeding the game. NO time limit — an expiring
+	// window left the player stuck staring at an unresponsive prompt if they
+	// took >15s to answer. Armed until a selection clears it, and self-clears
+	// once we're no longer inside a game (Quit happened / game closed).
+	private static volatile boolean quitConfirmArmed = false;
+	public static boolean inQuitConfirm() {
+		if (quitConfirmArmed && !Emulator.isInGame()) quitConfirmArmed = false;
+		return quitConfirmArmed;
+	}
+	public static void clearQuitConfirm() { quitConfirmArmed = false; }
 
 	/** Raise MAME's in-frame "Are you sure you want to quit?" and arm nav for it. */
 	public static void exitGame(MAME4droid mm) {
 		GlassesUi ui = mm.getGlassesUi();
 		if (ui != null && ui.isMenuVisible()) mm.runOnUiThread(ui::hideMenu);
+		// a paused machine can't draw or answer the prompt, and any held paddle
+		// deflection would fight the prompt's navigation — clear both first
+		Emulator.resume();
+		Emulator.setAnalogData(1, 0, 0f, 0f);
 		esc(mm);
-		quitConfirmUntil = android.os.SystemClock.uptimeMillis() + 15000;
+		quitConfirmArmed = true;
 	}
 
 	public static void exit(MAME4droid mm) {
 		if (Emulator.isInGame()) {
+			// EXIT pressed AGAIN while the prompt is already up = the prompt
+			// isn't responding (a wedged core survives resume() attempts).
+			// Guaranteed escape hatch: clean Phoenix restart to the game list —
+			// slower than a normal quit, but the player is NEVER trapped.
+			if (inQuitConfirm()) {
+				clearQuitConfirm();
+				LinkServer.push("MSG Game not responding — restarting to the game list…");
+				LinkServer.reloadGameList(mm);
+				return;
+			}
 			// ONE confirmation: MAME's own in-frame prompt (both eyes),
 			// answered by a glasses tap or the phone pad.
 			exitGame(mm);

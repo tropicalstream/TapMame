@@ -194,11 +194,11 @@ class MainActivity : Activity(), LinkClient.Listener {
 
     override fun onRestarting() {
         // the glasses are doing a clean restart to rebuild the game list; the
-        // link will drop for a few seconds and the reconnect loop will rejoin
+        // link will drop for a few seconds and the reconnect loop will rejoin.
+        // Status line only — queued toasts linger on screen and read as stuck.
         restarting = true
         runOnUiThread {
             pad.statusText = "glasses restarting to load games…"
-            Toast.makeText(this, "Loading games on glasses — reconnecting…", Toast.LENGTH_SHORT).show()
             ui.removeCallbacks(clearRestarting)
             ui.postDelayed(clearRestarting, 30000)   // don't imply a reload forever
         }
@@ -326,8 +326,7 @@ class MainActivity : Activity(), LinkClient.Listener {
     private fun reloadAfterManage() {
         if (gamesDeleted) {
             gamesDeleted = false
-            link.reloadGames()
-            Toast.makeText(this, "Updating game list on glasses…", Toast.LENGTH_SHORT).show()
+            link.reloadGames()   // status line shows "glasses restarting…" via RESTARTING
         }
     }
 

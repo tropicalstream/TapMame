@@ -282,11 +282,15 @@ public class LinkServer {
 				//    the key MAME's UI-select honours), B backs out (ESC).
 				if (!Emulator.isInGame() || Emulator.isInMenu() || TapNav.inQuitConfirm()) {
 					if ((pressed & FIRE) != 0) {
+						// a paused machine can't process the prompt's ENTER
+						if (TapNav.inQuitConfirm()) Emulator.resume();
 						TapNav.mameKey(mm, android.view.KeyEvent.KEYCODE_ENTER);
 						if (TapNav.inQuitConfirm()) TapNav.clearQuitConfirm();
 					}
-					if ((pressed & (1L << 11)) != 0)   // B = back
+					if ((pressed & (1L << 11)) != 0) {   // B = back
+						if (TapNav.inQuitConfirm()) { Emulator.resume(); TapNav.clearQuitConfirm(); }
 						TapNav.mameKey(mm, android.view.KeyEvent.KEYCODE_ESCAPE);
+					}
 					// directions only (strip buttons) so the menu scrolls
 					Emulator.setDigitalData(p, mask & (UP | DOWN | LEFT | RIGHT));
 					break;
