@@ -42,6 +42,16 @@ class LinkClient(private val context: Context, private val listener: Listener) {
 
     @Volatile private var socket: Socket? = null
     @Volatile private var running = false
+    /**
+     * Which connection attempt is the live one. `running` alone was a single
+     * shared flag: a reconnect set it false then true again, and the PREVIOUS
+     * writer — parked in outQueue.take() — woke up, saw it true, and carried
+     * on. Two writers then raced for the same queue, an upload could be taken
+     * by the one holding a dead socket, and whichever exited first closed the
+     * OTHER one's socket in its finally block. Every writer now carries its
+     * own generation and only acts while it is still the current one.
+     */
+    @Volatile private var generation = 0
     private val outQueue = LinkedBlockingQueue<Any>()   // String line or RomJob
     private var reader: Thread? = null
     private var writer: Thread? = null
@@ -51,6 +61,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     @Volatile private var sweeping = false          // a subnet sweep is in progress
     @Volatile private var reconnecting = false      // the keep-trying loop is running
     @Volatile private var connectingHost: String? = null   // host of the in-flight attempt
+    @Volatile private var uploading = false               // a ROM is on the wire RIGHT NOW
     @Volatile private var pendingRom: String? = null      // ROM awaiting the glasses' OK/ERR
     @Volatile private var romVerify: ((List<String>) -> Unit)? = null   // one-shot ROMS? check
 
@@ -174,10 +185,34 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         if (reconnecting) return
         reconnecting = true
         Thread {
+            var knownFailures = 0
             while (active) {
-                if (!isConnected) {
-                    lastHost()?.let { probeThenConnect(it) }   // fast: the address that last worked
-                    startSweep()                                // fallback: find the current one
+                if (!isConnected && !uploading) {
+                    // Connect straight to the last good address — do NOT probe it
+                    // first. The glasses serve ONE client at a time, so a probe
+                    // plus a connect meant two sockets per cycle competing for
+                    // that single slot (the paired "companion connected" lines
+                    // in the glasses log). A failed connect is just as cheap.
+                    val known = lastHost()
+                    if (known != null) {
+                        connect(known)
+                        // connect() is ASYNCHRONOUS — the socket is established on
+                        // the writer thread. Testing isConnected right here always
+                        // read false, which fired the /24 sweep EVERY cycle: 254
+                        // probe sockets, one of them landing on the glasses and
+                        // fighting the real connection for its single client slot.
+                        // That storm — not the Wi-Fi, which is spotless — is what
+                        // broke uploads mid-transfer. Give the attempt time to
+                        // land before judging it.
+                        try { Thread.sleep(3000) } catch (_: Exception) { break }
+                        if (isConnected) knownFailures = 0 else knownFailures++
+                    }
+                    // Only sweep when we genuinely have nowhere to go: no known
+                    // address at all, or it has stopped answering repeatedly.
+                    if (known == null || knownFailures >= 3) {
+                        startSweep()
+                        knownFailures = 0
+                    }
                 }
                 try { Thread.sleep(4000) } catch (_: Exception) { break }
             }
@@ -231,11 +266,18 @@ class LinkClient(private val context: Context, private val listener: Listener) {
 
     @Synchronized
     fun connect(host: String, port: Int = PORT) {
+        // NEVER reconnect on top of a running upload. A stack trace caught both
+        // the reconnect loop AND mDNS resolution calling connect() mid-transfer;
+        // connect() begins by disconnecting, which closed the socket under the
+        // ROM and produced "Connection reset" on the glasses and "Broken pipe"
+        // on the phone. The transfer owns the link until it is finished.
+        if (uploading) return
         if (isConnected) return
         if (running && connectingHost == host) return   // same attempt already in flight
         disconnect()
         running = true
         connectingHost = host
+        val gen = ++generation
         writer = Thread {
             var activeRom: RomJob? = null
             try {
@@ -247,7 +289,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                 listener.onLinkState(true, host)
                 reader = Thread { readLoop(s) }.apply { isDaemon = true; start() }
                 val out = BufferedOutputStream(s.getOutputStream())
-                while (running) {
+                while (running && generation == gen) {
                     when (val item = outQueue.take()) {
                         is String -> {
                             out.write((item + "\n").toByteArray())
@@ -255,6 +297,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                         }
                         is RomJob -> {
                             activeRom = item
+                            uploading = true
                             out.write(("ROM ${item.name} ${item.size}\n").toByteArray())
                             val buf = ByteArray(65536)
                             var left = item.size
@@ -278,11 +321,13 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                                 // it was meant to report.
                                 awaitRomAck(item.name)
                             }
+                            uploading = false
                             activeRom = null
                         }
                     }
                 }
             } catch (e: Exception) {
+                uploading = false
                 Log.w(TAG, "link lost: $e")
                 // an upload dying mid-transfer must be REPORTED, not silent —
                 // the pad showed 'Sending…' forever while the socket was dead
@@ -291,11 +336,15 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     listener.onRomResult(false, "${it.name}: connection lost — try again")
                 }
             } finally {
-                running = false
-                connectingHost = null
-                try { socket?.close() } catch (_: Exception) {}
-                socket = null
-                listener.onLinkState(false, null)
+                // A superseded writer must exit QUIETLY: the shared socket and
+                // link state belong to whoever came after it.
+                if (generation == gen) {
+                    running = false
+                    connectingHost = null
+                    try { socket?.close() } catch (_: Exception) {}
+                    socket = null
+                    listener.onLinkState(false, null)
+                }
             }
         }.apply { isDaemon = true; start() }
     }
@@ -335,6 +384,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
 
     fun disconnect() {
         running = false
+        generation++          // every writer alive right now is now superseded
         // report queued uploads instead of silently dropping them
         while (true) {
             val item = outQueue.poll() ?: break

@@ -164,15 +164,23 @@ class MainActivity : Activity(), LinkClient.Listener {
 
     override fun onResume() {
         super.onResume()
+        pendingRomPick = false
         link.startDiscovery()
         ui.postDelayed(gamePoll, 2000)
     }
 
     override fun onPause() {
         super.onPause()
+        link.sendPad(0)   // never leave a button latched on the glasses
+        // THE UPLOAD BUG: choosing a ROM opens the system file picker, which
+        // pauses this activity. Tearing the link down here meant the upload
+        // had nowhere to go. And stopping the 2-second polls here left the
+        // kept-alive socket SILENT while the user browsed, so it was stale by
+        // the time the file came back — the write failed one millisecond in.
+        // Stepping aside for our own picker changes nothing about the link.
+        if (pendingRomPick) return
         ui.removeCallbacks(gamePoll)
         link.stopDiscovery()
-        link.sendPad(0)   // never leave a button latched on the glasses
         link.disconnect()
     }
 
@@ -236,10 +244,42 @@ class MainActivity : Activity(), LinkClient.Listener {
         }
     }
 
+    private var lastRomUri: Uri? = null
+    private var lastRomName = ""
+    private var romRetries = 0
+
     override fun onRomResult(ok: Boolean, msg: String) {
         runOnUiThread {
+            // A link that dropped mid-send is worth ONE silent retry: the file
+            // is still on this phone and the pad reconnects in seconds. Only a
+            // second failure is the user's problem.
+            val droppedLink = !ok && (msg.contains("connection lost") ||
+                msg.contains("not sent") || msg.contains("not connected"))
+            if (droppedLink && romRetries == 0 && lastRomUri != null) {
+                romRetries = 1
+                pad.statusText = "link dropped — retrying $lastRomName…"
+                ui.postDelayed({ retryRom() }, 3500)
+                return@runOnUiThread
+            }
             Toast.makeText(this, if (ok) "ROM stored: $msg" else "ROM failed: $msg", Toast.LENGTH_LONG).show()
+            pad.statusText = if (link.isConnected) "glasses linked" else "searching for glasses…"
         }
+    }
+
+    private fun retryRom() {
+        val uri = lastRomUri ?: return
+        if (!link.isConnected) { ui.postDelayed({ retryRom() }, 3000); return }
+        val stream = runCatching { contentResolver.openInputStream(uri) }.getOrNull() ?: return
+        var size = -1L
+        contentResolver.query(uri, null, null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val si = c.getColumnIndex(OpenableColumns.SIZE)
+                if (si >= 0) size = c.getLong(si)
+            }
+        }
+        if (size <= 0) { runCatching { stream.close() }; return }
+        pad.statusText = "sending $lastRomName (retry)…"
+        link.sendRom(lastRomName, size, stream)
     }
 
     override fun onServerMsg(msg: String) {
@@ -362,7 +402,10 @@ class MainActivity : Activity(), LinkClient.Listener {
                         // after uploading a ROM, this restarts the glasses app so
                         // MAME re-audits its rompath and the new game shows up
                         link.reloadGames()
-                        Toast.makeText(this, "Reloading game list on glasses…", Toast.LENGTH_SHORT).show()
+                        // Status line, not a toast: a transient state shown in a
+                        // toast goes stale on screen (and several queue up behind
+                        // each other), which read as the app being stuck.
+                        pad.statusText = "reloading game list on glasses…"
                     }
                     8 -> manageGamesDialog()
                     9 -> {
@@ -493,7 +536,7 @@ class MainActivity : Activity(), LinkClient.Listener {
         Thread {
             try {
                 val (stream, size) = Nas.open(url, user, pass)
-                runOnUiThread { Toast.makeText(this, "Sending $name ($size bytes)…", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { pad.statusText = "sending $name…" }
                 link.sendRom(name, size, stream)
             } catch (ex: Exception) {
                 runOnUiThread { Toast.makeText(this, "NAS read: ${ex.message}", Toast.LENGTH_LONG).show() }
@@ -527,7 +570,9 @@ class MainActivity : Activity(), LinkClient.Listener {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != 41 || resultCode != RESULT_OK) return
+        if (requestCode != 41) return
+        pendingRomPick = false
+        if (resultCode != RESULT_OK) return
         val uri: Uri = data?.data ?: return
         var name = "rom.zip"; var size = -1L
         contentResolver.query(uri, null, null, null, null)?.use { cur ->
@@ -541,7 +586,8 @@ class MainActivity : Activity(), LinkClient.Listener {
         if (size <= 0) { Toast.makeText(this, "Cannot read file size", Toast.LENGTH_LONG).show(); return }
         val stream = contentResolver.openInputStream(uri)
         if (stream == null) { Toast.makeText(this, "Cannot open file", Toast.LENGTH_LONG).show(); return }
-        Toast.makeText(this, "Sending $name ($size bytes)…", Toast.LENGTH_SHORT).show()
+        pad.statusText = "sending $name (${size / 1024} KB)…"
+        lastRomUri = uri; lastRomName = name; romRetries = 0
         link.sendRom(name, size, stream)
     }
 }
