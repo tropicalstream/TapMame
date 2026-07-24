@@ -156,6 +156,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     // ---------------------------------------------------------- commands
 
     fun sendPad(mask: Long) { if (running) outQueue.offer("PAD 0 $mask") }
+    fun sendAxis(type: Int, x: Float, y: Float) { if (running) outQueue.offer("AXIS $type 0 $x $y") }
     fun queryGame() { if (running) outQueue.offer("GAME?") }
     fun openGameSettings() { if (running) outQueue.offer("CMD GAMEMENU") }
     fun openGlobalSettings() { if (running) outQueue.offer("CMD SETTINGS") }

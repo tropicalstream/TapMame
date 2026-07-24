@@ -181,9 +181,12 @@ public class LinkServer {
 				break;
 			}
 			case "AXIS": {
-				int p = Integer.parseInt(tk[1]);
+				// AXIS <analogType> <index> <x> <y> — type is LEFT_STICK_DATA
+				// etc.; MAME maps the analog stick to the cabinet's real
+				// paddle/dial/wheel/trackball internally.
+				int type = Integer.parseInt(tk[1]);
 				int i = Integer.parseInt(tk[2]);
-				Emulator.setAnalogData(p, i, Float.parseFloat(tk[3]), Float.parseFloat(tk[4]));
+				Emulator.setAnalogData(type, i, Float.parseFloat(tk[3]), Float.parseFloat(tk[4]));
 				break;
 			}
 			case "KEY": {
@@ -191,11 +194,12 @@ public class LinkServer {
 				break;
 			}
 			case "GAME?": {
-				// getValueStr(ROM_NAME) is a set-only key upstream, so the
-				// name comes from the Java-side launch capture; a game booted
-				// from MAME's own frontend reports "(running)" until a native
-				// current-machine export exists.
-				String name = currentGame;
+				// GAME_SELECTED is populated by the core for the running
+				// machine whatever the launch path (the NetPlay dialog reads
+				// the same key); fall back to the Java launch capture.
+				String name = null;
+				try { name = Emulator.getValueStr(Emulator.GAME_SELECTED); } catch (Exception ignored) {}
+				if (name == null || name.isEmpty()) name = currentGame;
 				if ((name == null || name.isEmpty()) && Emulator.isInGame()) name = "(running)";
 				reply(out, "GAME " + (name == null ? "" : name));
 				break;
