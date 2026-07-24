@@ -34,7 +34,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         const val PORT = 19999
         private const val TAG = "TapMamePad"
         private val CMD_ACKS = setOf(
-            "gamemenu", "settings", "menu", "exit", "exitgame", "nethost", "netjoin", "setpref")
+            "gamemenu", "settings", "menu", "exit", "exitgame", "nethost", "netjoin", "setpref", "reload")
     }
 
     @Volatile private var socket: Socket? = null
@@ -197,6 +197,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     fun queryNpAddr() { if (running) outQueue.offer("NPADDR?") }
     fun exit() { if (running) outQueue.offer("CMD EXIT") }
     fun menu() { if (running) outQueue.offer("CMD MENU") }
+    fun reloadGames() { if (running) outQueue.offer("CMD RELOAD") }
     fun sendRom(name: String, size: Long, stream: InputStream) {
         if (running) outQueue.offer(RomJob(name, size, stream))
         else listener.onRomResult(false, "not connected")

@@ -89,6 +89,26 @@ public class LinkServer {
 		}, "TapMameTab").start();
 	}
 
+	/**
+	 * Reliably restart TapMame so MAME rebuilds its game list and re-audits the
+	 * rompath — the only way a freshly uploaded romset becomes visible. Handed
+	 * off to RestartActivity, which runs in a separate process and so can bring
+	 * the app back without it disappearing (see RestartActivity for the why).
+	 * A short delay lets the OK/MSG replies flush to the phone first.
+	 */
+	public static void reloadGameList(final MAME4droid mm) {
+		new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+			try {
+				android.content.Intent i = new android.content.Intent(mm, RestartActivity.class);
+				i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+				i.putExtra(RestartActivity.EXTRA_MAIN_PID, android.os.Process.myPid());
+				mm.startActivity(i);
+			} catch (Exception e) {
+				Log.w(TAG, "reloadGameList failed: " + e);
+			}
+		}, 400);
+	}
+
 	public synchronized void start() {
 		if (running) return;
 		running = true;
@@ -293,6 +313,13 @@ public class LinkServer {
 						TapNav.esc(mm);
 						reply(out, "OK exitgame");
 						break;
+					case "RELOAD":
+						// clean, reliable whole-app restart so MAME re-audits the
+						// rompath and newly uploaded games appear in the list
+						reply(out, "OK reload");
+						push("MSG Reloading game list…");
+						reloadGameList(mm);
+						break;
 					default:
 						reply(out, "ERR unknown cmd " + tk[1]);
 				}
@@ -399,18 +426,21 @@ public class LinkServer {
 		if (tmp.renameTo(f)) {
 			reply(out, "OK " + name);
 			Log.i(TAG, "ROM stored: " + f + " (" + size + " bytes)");
-			// The frontend builds its game list at startup, so a new romset
-			// stays invisible until a rescan. When we're just browsing the
-			// list, restart the app now so the game appears immediately;
-			// mid-game we don't interrupt — it shows up next restart.
-			if (!Emulator.isInGameButNotInMenu()) {
-				push("MSG ROM stored: " + name + " — refreshing game list…");
-				// small delay lets the OK reply + MSG flush to the phone first
-				new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-					() -> mm.getMainHelper().restartApp(), 500);
-			} else {
-				push("MSG ROM stored: " + name + " — it will appear after the game list reloads");
-			}
+			// MAME builds its game list once, when the native core boots, and
+			// gives us no in-process rescan hook (MainHelper.reload() is a no-op
+			// on this fork). We DELIBERATELY do NOT restart the app to surface a
+			// freshly-uploaded romset. Every automatic kill/relaunch we tried on
+			// the X3 (API 33) either couldn't come back — background-activity
+			// launch is blocked post-API29 — or left TapMame force-stopped, and a
+			// force-stopped app drops out of the glasses launcher. That is the
+			// bug where "the app keeps disappearing after an upload". So we store
+			// the file and tell the player to reopen the app on their own terms;
+			// a user-initiated relaunch is the one restart Android always honors,
+			// and it never makes the icon vanish.
+			String how = Emulator.isInGame()
+				? name + " stored — after your game, use Reload game list to load it."
+				: name + " stored — tap Reload game list to load it now.";
+			push("MSG " + how);
 		} else {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();

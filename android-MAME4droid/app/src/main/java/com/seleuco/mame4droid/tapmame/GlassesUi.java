@@ -122,6 +122,9 @@ public class GlassesUi extends View {
 			it.add("Exit Game");          ac.add(() -> { hideMenu(); TapNav.exitGame(mm); });
 		} else {
 			it.add("Close Menu");         ac.add(this::hideMenu);
+			// rebuild MAME's game list so newly uploaded ROMs appear (reliable
+			// whole-app restart that never drops the launcher icon)
+			it.add("Reload game list");   ac.add(() -> { hideMenu(); LinkServer.reloadGameList(mm); });
 		}
 		// Settings and NetPlay live on the PHONE now — they were Android
 		// screens shown in one eye, which is uncomfortable through the
