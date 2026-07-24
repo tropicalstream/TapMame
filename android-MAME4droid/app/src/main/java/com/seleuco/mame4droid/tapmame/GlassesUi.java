@@ -222,6 +222,18 @@ public class GlassesUi extends View {
 		invalidate();
 	}
 
+	/** Remote navigation from the companion pad (stick up/down). */
+	public void menuMove(int d) {
+		if (menuVisible) move(d);
+	}
+
+	/** Remote select from the companion pad (FIRE/START). */
+	public void menuSelect() {
+		if (!menuVisible) return;
+		MenuAction a = sel < actions.length ? actions[sel] : null;
+		if (a != null) a.run();
+	}
+
 	/** One key press into MAME (Android keycode; native maps to MAME UI). */
 	private void sendKey(final int code) {
 		new Thread(() -> {

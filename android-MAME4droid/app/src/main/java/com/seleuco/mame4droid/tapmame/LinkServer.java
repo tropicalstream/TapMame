@@ -49,6 +49,7 @@ public class LinkServer {
 	public static volatile String currentGame = "";
 
 	private static volatile LinkServer instance;
+	private long lastPadMask = 0;
 
 	private final MAME4droid mm;
 	private ServerSocket server;
@@ -177,6 +178,21 @@ public class LinkServer {
 			case "PAD": {
 				int p = Integer.parseInt(tk[1]);
 				long mask = Long.parseLong(tk[2]);
+				// while the TapMame SBS menu is open, the pad drives the menu
+				// (stick up/down = highlight, FIRE/START = select) instead of
+				// the paused game
+				GlassesUi ui = mm.getGlassesUi();
+				if (ui != null && ui.isMenuVisible()) {
+					long pressed = mask & ~lastPadMask;
+					lastPadMask = mask;
+					if ((pressed & 0x1) != 0) mm.runOnUiThread(() -> ui.menuMove(-1));       // UP
+					if ((pressed & 0x10) != 0) mm.runOnUiThread(() -> ui.menuMove(1));       // DOWN
+					if ((pressed & ((1L << 10) | (1L << 8))) != 0)                            // A or START
+						mm.runOnUiThread(ui::menuSelect);
+					Emulator.setDigitalData(p, 0);
+					break;
+				}
+				lastPadMask = mask;
 				Emulator.setDigitalData(p, mask);
 				break;
 			}
