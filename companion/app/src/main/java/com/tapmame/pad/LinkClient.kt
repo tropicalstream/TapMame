@@ -51,7 +51,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     @Volatile private var sweeping = false          // a subnet sweep is in progress
     @Volatile private var reconnecting = false      // the keep-trying loop is running
     @Volatile private var connectingHost: String? = null   // host of the in-flight attempt
-    @Volatile private var romAck: java.util.concurrent.CountDownLatch? = null   // OK/ERR after a ROM send
+    @Volatile private var pendingRom: String? = null      // ROM awaiting the glasses' OK/ERR
+    @Volatile private var romVerify: ((List<String>) -> Unit)? = null   // one-shot ROMS? check
 
     private class RomJob(val name: String, val size: Long, val stream: InputStream)
 
@@ -184,6 +185,48 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         }.apply { isDaemon = true; start() }
     }
 
+    /** A ROMS? answer goes to a pending verification first, else to the UI. */
+    private fun deliverRoms(names: List<String>) {
+        val v = romVerify
+        if (v != null) { romVerify = null; v(names) } else listener.onRoms(names)
+    }
+
+    /**
+     * Wait for a ROM's OK/ERR off the writer thread. If none comes, do NOT
+     * cry failure — ASK. A stored ROM that simply lost its reply (a dropped
+     * socket, a lull) is a success the player should be told about, and the
+     * glasses can settle it definitively by listing what they actually hold.
+     */
+    private fun awaitRomAck(name: String) {
+        pendingRom = name
+        Thread {
+            var waited = 0
+            while (waited < 40_000 && pendingRom == name && running) {
+                try { Thread.sleep(500) } catch (_: Exception) { return@Thread }
+                waited += 500
+            }
+            if (pendingRom != name) return@Thread            // the ack arrived
+            // No reply. Ask what the glasses are actually holding before judging.
+            romVerify = { names ->
+                pendingRom = null
+                if (names.any { it.equals(name, ignoreCase = true) })
+                    listener.onRomResult(true, "$name (stored — the reply went missing)")
+                else
+                    listener.onRomResult(false, "$name: no reply and not stored — try again")
+            }
+            if (isConnected) {
+                queryRoms()
+                Thread.sleep(6000)
+            }
+            // Still nothing back: say only what we honestly know.
+            if (romVerify != null) {
+                romVerify = null
+                pendingRom = null
+                listener.onRomResult(false, "$name: no reply from glasses — check the game list")
+            }
+        }.apply { isDaemon = true; start() }
+    }
+
     // ---------------------------------------------------------- connection
 
     @Synchronized
@@ -212,8 +255,6 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                         }
                         is RomJob -> {
                             activeRom = item
-                            val ack = java.util.concurrent.CountDownLatch(1)
-                            romAck = ack
                             out.write(("ROM ${item.name} ${item.size}\n").toByteArray())
                             val buf = ByteArray(65536)
                             var left = item.size
@@ -228,11 +269,15 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                             item.stream.close()
                             if (sent != item.size) {
                                 listener.onRomResult(false, "${item.name}: could not read the whole file ($sent/${item.size})")
-                            } else if (!ack.await(40, java.util.concurrent.TimeUnit.SECONDS)) {
-                                // no OK/ERR came back — don't sit on "Sending…" forever
-                                listener.onRomResult(false, "${item.name}: no reply from glasses — upload stalled, try again")
+                            } else {
+                                // Hand the wait to a watchdog and get straight back to
+                                // draining the queue. Blocking the writer here starved
+                                // the keepalive polls, the glasses' idle timeout then
+                                // closed the socket, and the "OK" we were waiting for
+                                // could never arrive on it — the wait CAUSED the stall
+                                // it was meant to report.
+                                awaitRomAck(item.name)
                             }
-                            romAck = null
                             activeRom = null
                         }
                     }
@@ -265,8 +310,9 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     line == "GAME" -> listener.onGame("")
                     line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
                     line == "RESTARTING" -> listener.onRestarting()
-                    line == "ROMS" -> listener.onRoms(emptyList())
-                    line.startsWith("ROMS ") -> listener.onRoms(line.substring(5).split("|").filter { it.isNotBlank() })
+                    line == "ROMS" -> deliverRoms(emptyList())
+                    line.startsWith("ROMS ") ->
+                        deliverRoms(line.substring(5).split("|").filter { it.isNotBlank() })
                     line.startsWith("DELOK ") -> listener.onRomDeleted(line.substring(6).trim(), true, "")
                     line.startsWith("DELERR ") -> {
                         val rest = line.substring(7)
@@ -280,8 +326,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                         if (i >= 0) listener.onPref(kv.substring(0, i), kv.substring(i + 1))
                     }
                     line.startsWith("OK ") && line.substring(3) in CMD_ACKS -> {}   // acks
-                    line.startsWith("OK ") -> { romAck?.countDown(); listener.onRomResult(true, line.substring(3)) }
-                    line.startsWith("ERR ") -> { romAck?.countDown(); listener.onRomResult(false, line.substring(4)) }
+                    line.startsWith("OK ") -> { pendingRom = null; listener.onRomResult(true, line.substring(3)) }
+                    line.startsWith("ERR ") -> { pendingRom = null; listener.onRomResult(false, line.substring(4)) }
                 }
             }
         } catch (_: Exception) {}

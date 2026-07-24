@@ -204,11 +204,16 @@ public class LinkServer {
 		while (running) {
 			try (Socket s = server.accept()) {
 				s.setTcpNoDelay(true);
-				// The companion polls every ~2s, so a live phone always reads
-				// well within this window; a half-dead connection (app killed,
-				// Wi-Fi dropped) times out and frees the server to accept the
-				// phone's fresh connection instead of blocking forever.
-				s.setSoTimeout(5000);
+				// Idle tolerance. This was 5s, on the theory that the companion
+				// polls every ~2s so a live phone always beats the window. In
+				// practice that made the link brittle: ANY 5-second lull —
+				// a Wi-Fi hiccup, the phone's writer busy with a ROM, a moment
+				// spent waiting on a reply — killed a perfectly healthy
+				// connection, and an upload's "OK" could then never arrive
+				// because the socket it was owed on had already been closed.
+				// 30s still frees the slot from a genuinely dead pad quickly
+				// enough, without severing live ones.
+				s.setSoTimeout(30000);
 				Log.i(TAG, "companion connected: " + s.getInetAddress());
 				serve(s);
 			} catch (IOException e) {
