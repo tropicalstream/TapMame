@@ -286,7 +286,7 @@ public class LinkServer {
 						break;
 					case "EXITGAME":   // legacy: direct leave-to-list (no confirm)
 						Emulator.resume();
-						TapNav.esc();
+						TapNav.esc(mm);
 						reply(out, "OK exitgame");
 						break;
 					default:

@@ -77,19 +77,32 @@ public class GlassesUi extends View {
 
 	// ------------------------------------------------------------- menus
 
+	private boolean menuPaused = false;
+
 	public void showMenu(String title, String[] items, MenuAction[] actions) {
+		showMenu(title, items, actions, true);
+	}
+
+	/**
+	 * @param pauseGame pause the emulator behind the menu. The exit confirm
+	 *   leaves the game RUNNING so that selecting Quit can ESC straight to the
+	 *   machine list — a just-resumed machine takes ESC to MAME's own quit
+	 *   prompt instead, which then needs a second confirm.
+	 */
+	public void showMenu(String title, String[] items, MenuAction[] actions, boolean pauseGame) {
 		this.title = title;
 		this.items = items;
 		this.actions = actions;
 		this.sel = 0;
 		menuVisible = true;
-		Emulator.pause();
+		menuPaused = pauseGame;
+		if (pauseGame) Emulator.pause();
 		invalidate();
 	}
 
 	public void hideMenu() {
 		menuVisible = false;
-		Emulator.resume();
+		if (menuPaused) { Emulator.resume(); menuPaused = false; }
 		invalidate();
 	}
 
@@ -127,12 +140,15 @@ public class GlassesUi extends View {
 
 	/** Leave the running game back to the game-select list (SBS confirm). */
 	public void showExitGameConfirm() {
-		showMenu("EXIT GAME?",
-			new String[]{"Keep Playing", "Exit to game list"},
+		// leave the game running behind this confirm (pauseGame=false) so Quit
+		// can ESC straight to the machine list
+		showMenu("ARE YOU SURE YOU WANT TO QUIT?",
+			new String[]{"Return to emulation", "Quit"},
 			new MenuAction[]{
-				this::hideMenu,
-				() -> { hideMenu(); TapNav.esc(); }
-			});
+				this::hideMenu,                                  // back to the game
+				() -> { hideMenu(); TapNav.quitToList(mm); }     // ESC+ENTER -> game list
+			},
+			false);
 	}
 
 	private void loadOrSave(boolean load) {
