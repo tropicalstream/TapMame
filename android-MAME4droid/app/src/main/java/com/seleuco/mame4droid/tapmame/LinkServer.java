@@ -139,6 +139,11 @@ public class LinkServer {
 		while (running) {
 			try (Socket s = server.accept()) {
 				s.setTcpNoDelay(true);
+				// The companion polls every ~2s, so a live phone always reads
+				// well within this window; a half-dead connection (app killed,
+				// Wi-Fi dropped) times out and frees the server to accept the
+				// phone's fresh connection instead of blocking forever.
+				s.setSoTimeout(5000);
 				Log.i(TAG, "companion connected: " + s.getInetAddress());
 				serve(s);
 			} catch (IOException e) {
@@ -178,21 +183,44 @@ public class LinkServer {
 			case "PAD": {
 				int p = Integer.parseInt(tk[1]);
 				long mask = Long.parseLong(tk[2]);
-				// while the TapMame SBS menu is open, the pad drives the menu
-				// (stick up/down = highlight, FIRE/START = select) instead of
-				// the paused game
+				long pressed = mask & ~lastPadMask;   // newly-pressed bits (edge)
+				lastPadMask = mask;
+				final long UP = 0x1, DOWN = 0x10, LEFT = 0x4, RIGHT = 0x40;
+				final long FIRE = (1L << 10) | (1L << 8);   // A or START = select
+
 				GlassesUi ui = mm.getGlassesUi();
+				// 1) TapMame's own SBS menu is open -> drive it
 				if (ui != null && ui.isMenuVisible()) {
-					long pressed = mask & ~lastPadMask;
-					lastPadMask = mask;
-					if ((pressed & 0x1) != 0) mm.runOnUiThread(() -> ui.menuMove(-1));       // UP
-					if ((pressed & 0x10) != 0) mm.runOnUiThread(() -> ui.menuMove(1));       // DOWN
-					if ((pressed & ((1L << 10) | (1L << 8))) != 0)                            // A or START
-						mm.runOnUiThread(ui::menuSelect);
+					if ((pressed & UP) != 0) mm.runOnUiThread(() -> ui.menuMove(-1));
+					if ((pressed & DOWN) != 0) mm.runOnUiThread(() -> ui.menuMove(1));
+					if ((pressed & FIRE) != 0) mm.runOnUiThread(ui::menuSelect);
 					Emulator.setDigitalData(p, 0);
 					break;
 				}
-				lastPadMask = mask;
+				// 2) an Android menu is on top (Global Settings, NetPlay...) ->
+				//    the pad becomes a DPAD remote for it
+				if (com.seleuco.mame4droid.tapmame.TapNav.androidNavActive()) {
+					if ((pressed & UP) != 0) TapNav.androidKey(mm, android.view.KeyEvent.KEYCODE_DPAD_UP);
+					if ((pressed & DOWN) != 0) TapNav.androidKey(mm, android.view.KeyEvent.KEYCODE_DPAD_DOWN);
+					if ((pressed & LEFT) != 0) TapNav.androidKey(mm, android.view.KeyEvent.KEYCODE_DPAD_LEFT);
+					if ((pressed & RIGHT) != 0) TapNav.androidKey(mm, android.view.KeyEvent.KEYCODE_DPAD_RIGHT);
+					if ((pressed & FIRE) != 0) TapNav.androidKey(mm, android.view.KeyEvent.KEYCODE_DPAD_CENTER);
+					Emulator.setDigitalData(p, 0);
+					break;
+				}
+				// 3) game-select frontend -> stick moves the list, FIRE opens
+				if (!Emulator.isInGame()) {
+					if ((pressed & FIRE) != 0)
+						new Thread(() -> {
+							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ENTER, Emulator.KEY_DOWN, (char) 0);
+							try { Thread.sleep(90); } catch (InterruptedException ignored) {}
+							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ENTER, Emulator.KEY_UP, (char) 0);
+						}, "TapMameSelect").start();
+					// pass directions only (strip buttons) so the list scrolls
+					Emulator.setDigitalData(p, mask & (UP | DOWN | LEFT | RIGHT));
+					break;
+				}
+				// 4) actually in a game -> full gameplay
 				Emulator.setDigitalData(p, mask);
 				break;
 			}
@@ -264,6 +292,42 @@ public class LinkServer {
 					default:
 						reply(out, "ERR unknown cmd " + tk[1]);
 				}
+				break;
+			}
+			case "GETPREF": {
+				// GETPREF <key> -> "PREF <key>=<value>" ("" when unset)
+				String key = tk[1];
+				Object v = mm.getPrefsHelper().getSharedPreferences().getAll().get(key);
+				reply(out, "PREF " + key + "=" + (v == null ? "" : String.valueOf(v)));
+				break;
+			}
+			case "SETPREF": {
+				// SETPREF <key> <bool|int|string> <value>
+				final String key = tk[1];
+				String type = tk[2];
+				String val = tk.length > 3 ? line.substring(line.indexOf(type) + type.length() + 1) : "";
+				android.content.SharedPreferences.Editor e =
+					mm.getPrefsHelper().getSharedPreferences().edit();
+				if (type.equals("bool")) e.putBoolean(key, val.equals("true") || val.equals("1"));
+				else if (type.equals("int")) e.putInt(key, Integer.parseInt(val.trim()));
+				else e.putString(key, val);
+				e.apply();
+				// re-apply live where the emulator supports it (many MAME
+				// options still take effect on the next game launch)
+				mm.runOnUiThread(() -> { try { mm.getPrefsHelper().resume(); } catch (Exception ignored) {} });
+				reply(out, "OK setpref");
+				break;
+			}
+			case "NAV?": {
+				// what the pad's stick+FIRE are currently driving, so the
+				// companion can hint the user
+				String mode;
+				GlassesUi ui = mm.getGlassesUi();
+				if (ui != null && ui.isMenuVisible()) mode = "menu";
+				else if (com.seleuco.mame4droid.tapmame.TapNav.androidNavActive()) mode = "android";
+				else if (Emulator.isInGame()) mode = "game";
+				else mode = "frontend";
+				reply(out, "NAV " + mode);
 				break;
 			}
 			case "NPADDR?": {

@@ -108,8 +108,10 @@ public class GlassesUi extends View {
 		} else {
 			it.add("Close Menu");         ac.add(this::hideMenu);
 		}
-		it.add("NetPlay");                ac.add(() -> { hideMenu(); mm.getNetPlay().createDialog(); });
-		it.add("Global Settings");        ac.add(() -> { hideMenu(); mm.getMainHelper().showSettings(); });
+		// Settings and NetPlay live on the PHONE now — they were Android
+		// screens shown in one eye, which is uncomfortable through the
+		// glasses. Only in-frame binocular UI stays here (Game Settings is
+		// MAME's own TAB menu, drawn in both eyes).
 		it.add("Exit TapMame");           ac.add(this::showExitConfirm);
 		showMenu("TAPMAME", it.toArray(new String[0]), ac.toArray(new MenuAction[0]));
 	}

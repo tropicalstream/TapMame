@@ -47,6 +47,9 @@ class PadView(
         set(v) { field = v; postInvalidate() }
     /** Vibrate on control presses (toggle in the ⚙ menu). */
     var haptics = true
+    /** What the pad currently drives on the glasses: game|frontend|android|menu. */
+    var navMode = "frontend"
+        set(v) { if (v != field) { field = v; postInvalidate() } }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f }
@@ -167,6 +170,19 @@ class PadView(
 
     override fun onDraw(c: Canvas) {
         c.drawColor(0xFF101418.toInt())
+        // navigation-mode hint banner: when the pad is driving a menu on the
+        // glasses instead of a game, spell out what stick + FIRE do
+        val hint = when (navMode) {
+            "android" -> "NAVIGATING GLASSES MENU  ·  stick = move   FIRE = select   MENU = back"
+            "menu" -> "TAPMAME MENU  ·  stick = move   FIRE = select"
+            "frontend" -> "GAME SELECT  ·  stick = browse   FIRE = open game"
+            else -> ""
+        }
+        if (hint.isNotEmpty()) {
+            val hy = if (height > width) height * 0.30f else height * 0.28f
+            text.textSize = minOf(width, height) * 0.03f; text.color = 0xFF7FA8CC.toInt()
+            c.drawText(hint, width / 2f, hy, text)
+        }
         text.textSize = minOf(width, height) * 0.032f; text.color = 0xFF9AA4AE.toInt()
         val line = buildString {
             append(statusText)

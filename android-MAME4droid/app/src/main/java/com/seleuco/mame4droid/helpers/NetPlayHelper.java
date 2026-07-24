@@ -288,8 +288,15 @@ public class NetPlayHelper {
 
         netplayDlg.show();
         // TapMame: pin to the left eye so it's readable through the glasses
-        // instead of straddling the SBS boundary
+        // instead of straddling the SBS boundary, and register it so the
+        // companion pad can navigate it (stick = DPAD, FIRE = select)
         com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, netplayDlg);
+        com.seleuco.mame4droid.tapmame.TapNav.setActiveDialog(netplayDlg);
+        netplayDlg.setOnDismissListener(d ->
+            com.seleuco.mame4droid.tapmame.TapNav.clearActiveDialog(netplayDlg));
+        // give the first button focus so DPAD navigation has a starting point
+        View sb = netplayDlg.findViewById(R.id.StartGameBtn);
+        if (sb != null) { sb.setFocusableInTouchMode(true); sb.requestFocus(); }
     }
 
     protected static boolean isIPv4Address(final String input) {

@@ -26,13 +26,15 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         fun onRomResult(ok: Boolean, msg: String)
         fun onServerMsg(msg: String)
         fun onNpAddr(addr: String)
+        fun onNav(mode: String)
+        fun onPref(key: String, value: String)
     }
 
     companion object {
         const val PORT = 19999
         private const val TAG = "TapMamePad"
         private val CMD_ACKS = setOf(
-            "gamemenu", "settings", "menu", "exit", "exitgame", "nethost", "netjoin")
+            "gamemenu", "settings", "menu", "exit", "exitgame", "nethost", "netjoin", "setpref")
     }
 
     @Volatile private var socket: Socket? = null
@@ -139,6 +141,12 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     line == "GAME" -> listener.onGame("")
                     line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
                     line.startsWith("NPADDR") -> listener.onNpAddr(line.removePrefix("NPADDR").trim())
+                    line.startsWith("NAV ") -> listener.onNav(line.substring(4).trim())
+                    line.startsWith("PREF ") -> {
+                        val kv = line.substring(5)
+                        val i = kv.indexOf('=')
+                        if (i >= 0) listener.onPref(kv.substring(0, i), kv.substring(i + 1))
+                    }
                     line.startsWith("OK ") && line.substring(3) in CMD_ACKS -> {}   // acks
                     line.startsWith("OK ") -> listener.onRomResult(true, line.substring(3))
                     line.startsWith("ERR ") -> listener.onRomResult(false, line.substring(4))
@@ -162,6 +170,9 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     fun sendPad(mask: Long) { if (running) outQueue.offer("PAD 0 $mask") }
     fun sendAxis(type: Int, x: Float, y: Float) { if (running) outQueue.offer("AXIS $type 0 $x $y") }
     fun queryGame() { if (running) outQueue.offer("GAME?") }
+    fun queryNav() { if (running) outQueue.offer("NAV?") }
+    fun getPref(key: String) { if (running) outQueue.offer("GETPREF $key") }
+    fun setPref(key: String, type: String, value: String) { if (running) outQueue.offer("SETPREF $key $type $value") }
     fun openGameSettings() { if (running) outQueue.offer("CMD GAMEMENU") }
     fun openGlobalSettings() { if (running) outQueue.offer("CMD SETTINGS") }
     fun netHost() { if (running) outQueue.offer("CMD NETHOST") }

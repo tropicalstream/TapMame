@@ -23,13 +23,41 @@ public final class TapNav {
 
 	/** The TapMame activity currently on top (emulator or a sub-screen). */
 	public static volatile Activity top;
+	/** A modal dialog (NetPlay, mode picker…) currently shown over top. */
+	public static volatile android.app.Dialog activeDialog;
 
 	public static void setTop(Activity a) { top = a; }
 	public static void clearTop(Activity a) { if (top == a) top = null; }
+	public static void setActiveDialog(android.app.Dialog d) { activeDialog = d; }
+	public static void clearActiveDialog(android.app.Dialog d) { if (activeDialog == d) activeDialog = null; }
 
 	private static boolean topIsSubScreen() {
 		Activity a = top;
 		return a != null && !(a instanceof MAME4droid) && !a.isFinishing();
+	}
+
+	/** An Android menu (settings activity or a dialog) is on top — one the
+	 *  companion pad should navigate as DPAD/ENTER rather than the game. */
+	public static boolean androidNavActive() {
+		android.app.Dialog d = activeDialog;
+		if (d != null && d.isShowing()) return true;
+		return topIsSubScreen();
+	}
+
+	/** Inject one Android key (DOWN+UP) into the focused menu window. */
+	public static void androidKey(final MAME4droid mm, final int keyCode) {
+		final android.app.Dialog d = activeDialog;
+		final Activity a = top;
+		mm.runOnUiThread(() -> {
+			long t = android.os.SystemClock.uptimeMillis();
+			android.view.KeyEvent down = new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, keyCode, 0);
+			android.view.KeyEvent up = new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_UP, keyCode, 0);
+			if (d != null && d.isShowing()) {
+				d.dispatchKeyEvent(down); d.dispatchKeyEvent(up);
+			} else if (a != null) {
+				a.dispatchKeyEvent(down); a.dispatchKeyEvent(up);
+			}
+		});
 	}
 
 	/**
