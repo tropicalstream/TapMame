@@ -49,6 +49,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     @Volatile private var sweeping = false          // a subnet sweep is in progress
     @Volatile private var reconnecting = false      // the keep-trying loop is running
     @Volatile private var connectingHost: String? = null   // host of the in-flight attempt
+    @Volatile private var romAck: java.util.concurrent.CountDownLatch? = null   // OK/ERR after a ROM send
 
     private class RomJob(val name: String, val size: Long, val stream: InputStream)
 
@@ -209,19 +210,28 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                         }
                         is RomJob -> {
                             activeRom = item
+                            val ack = java.util.concurrent.CountDownLatch(1)
+                            romAck = ack
                             out.write(("ROM ${item.name} ${item.size}\n").toByteArray())
                             val buf = ByteArray(65536)
                             var left = item.size
+                            var sent = 0L
                             while (left > 0) {
                                 val n = item.stream.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
                                 if (n == -1) break
                                 out.write(buf, 0, n)
-                                left -= n
+                                left -= n; sent += n
                             }
                             out.flush()
                             item.stream.close()
+                            if (sent != item.size) {
+                                listener.onRomResult(false, "${item.name}: could not read the whole file ($sent/${item.size})")
+                            } else if (!ack.await(40, java.util.concurrent.TimeUnit.SECONDS)) {
+                                // no OK/ERR came back — don't sit on "Sending…" forever
+                                listener.onRomResult(false, "${item.name}: no reply from glasses — upload stalled, try again")
+                            }
+                            romAck = null
                             activeRom = null
-                            // the server's OK/ERR reply arrives via readLoop
                         }
                     }
                 }
@@ -261,8 +271,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                         if (i >= 0) listener.onPref(kv.substring(0, i), kv.substring(i + 1))
                     }
                     line.startsWith("OK ") && line.substring(3) in CMD_ACKS -> {}   // acks
-                    line.startsWith("OK ") -> listener.onRomResult(true, line.substring(3))
-                    line.startsWith("ERR ") -> listener.onRomResult(false, line.substring(4))
+                    line.startsWith("OK ") -> { romAck?.countDown(); listener.onRomResult(true, line.substring(3)) }
+                    line.startsWith("ERR ") -> { romAck?.countDown(); listener.onRomResult(false, line.substring(4)) }
                 }
             }
         } catch (_: Exception) {}

@@ -56,6 +56,7 @@ public class LinkServer {
 	private Thread thread;
 	private volatile boolean running;
 	private volatile OutputStream clientOut;
+	private volatile Socket clientSocket;
 	private NsdManager nsd;
 	private NsdManager.RegistrationListener nsdListener;
 
@@ -217,6 +218,7 @@ public class LinkServer {
 		InputStream in = new BufferedInputStream(s.getInputStream());
 		OutputStream out = new BufferedOutputStream(s.getOutputStream());
 		clientOut = out;
+		clientSocket = s;
 		try {
 			StringBuilder sb = new StringBuilder(96);
 			int c;
@@ -233,6 +235,7 @@ public class LinkServer {
 			}
 		} finally {
 			clientOut = null;
+			clientSocket = null;
 		}
 	}
 
@@ -433,6 +436,14 @@ public class LinkServer {
 		File f = new File(dir, name);
 		File tmp = new File(dir, name + ".part");
 		long got = 0;
+		// The connection normally uses a tight 5s read timeout so a dead pad is
+		// noticed fast — but that also aborts a ROM transfer on any brief Wi-Fi
+		// gap, which was the "stuck on Sending…" hang. Give the transfer a much
+		// longer per-read window (it rides through hiccups); restore afterwards.
+		final Socket sk = clientSocket;
+		final int prevTimeout = sk != null ? sk.getSoTimeout() : 0;
+		if (sk != null) sk.setSoTimeout(45000);
+		boolean complete = false;
 		try (FileOutputStream fo = new FileOutputStream(tmp)) {
 			byte[] buf = new byte[65536];
 			while (got < size) {
@@ -441,11 +452,20 @@ public class LinkServer {
 				fo.write(buf, 0, n);
 				got += n;
 			}
+			complete = (got == size);
+		} catch (IOException e) {
+			Log.w(TAG, "ROM read interrupted at " + got + "/" + size + ": " + e);
+		} finally {
+			if (sk != null) try { sk.setSoTimeout(prevTimeout); } catch (Exception ignored) {}
 		}
-		if (got != size) {
+		if (!complete) {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();
-			reply(out, "ERR short transfer " + got + "/" + size);
+			try { reply(out, "ERR upload interrupted (" + got + "/" + size + ") — try again"); } catch (Exception ignored) {}
+			// the byte stream is now out of sync with the command protocol, so
+			// drop the link: the phone reports failure and reconnects cleanly
+			// rather than us parsing leftover ROM bytes as garbage commands
+			if (sk != null) try { sk.close(); } catch (Exception ignored) {}
 			return;
 		}
 		// zip romsets get an integrity pass before they're accepted: every
