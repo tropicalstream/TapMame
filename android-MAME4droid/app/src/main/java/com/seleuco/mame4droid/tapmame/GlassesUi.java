@@ -123,6 +123,16 @@ public class GlassesUi extends View {
 			});
 	}
 
+	/** Leave the running game back to the game-select list (SBS confirm). */
+	public void showExitGameConfirm() {
+		showMenu("EXIT GAME?",
+			new String[]{"Keep Playing", "Exit to game list"},
+			new MenuAction[]{
+				this::hideMenu,
+				() -> { hideMenu(); TapNav.esc(); }
+			});
+	}
+
 	private void loadOrSave(boolean load) {
 		Emulator.resume();
 		int key = load ? Emulator.LOADSTATE : Emulator.SAVESTATE;

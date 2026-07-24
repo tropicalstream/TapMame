@@ -183,6 +183,9 @@ public class UserPreferences extends PreferenceActivity implements OnSharedPrefe
 	  @Override
 	    protected void onResume() {
 	        super.onResume();
+	        // TapMame: register as the foreground activity so the companion
+	        // phone's EXIT/MENU can back out of this settings screen
+	        com.seleuco.mame4droid.tapmame.TapNav.setTop(this);
 	        // Setup the initial values
 	        //mCheckBoxPreference.setSummary(sharedPreferences.getBoolean(key, false) ? "Disable this setting" : "Enable this setting");
 		  	mPrefGlobalVideoRenderMode.setSummary(curVal(mPrefGlobalVideoRenderMode.getEntry()));
@@ -233,6 +236,7 @@ public class UserPreferences extends PreferenceActivity implements OnSharedPrefe
 	    @Override
 	    protected void onPause() {
 	        super.onPause();
+	        com.seleuco.mame4droid.tapmame.TapNav.clearTop(this);
 
 	        // Unregister the listener whenever a key changes
 	        getPreferenceScreen().getSharedPreferences().unregisterOnSharedPreferenceChangeListener(this);

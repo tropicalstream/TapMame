@@ -243,23 +243,23 @@ public class LinkServer {
 						reply(out, "OK netjoin");
 						break;
 					}
-					case "EXITGAME":
-						// leave the running game back to the system-select
-						// frontend: ESC = MAME's UI cancel
-						Emulator.resume();
-						new Thread(() -> {
-							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ESCAPE, Emulator.KEY_DOWN, (char) 0);
-							try { Thread.sleep(120); } catch (InterruptedException ignored) {}
-							Emulator.setKeyData(android.view.KeyEvent.KEYCODE_ESCAPE, Emulator.KEY_UP, (char) 0);
-						}, "TapMameEsc").start();
-						reply(out, "OK exitgame");
+					case "EXIT":
+						// context-aware: in a game -> SBS exit-game confirm;
+						// not in a game -> straight out to the game-select
+						// screen (closing settings / open menus on the way)
+						TapNav.exit(mm);
+						reply(out, "OK exit");
 						break;
 					case "MENU":
-						// the TapMame SBS menu on the glasses (both eyes)
-						mm.runOnUiThread(() -> {
-							if (mm.getGlassesUi() != null) mm.getGlassesUi().showMainMenu();
-						});
+						// context-aware: something open -> back one level;
+						// otherwise open the TapMame SBS menu
+						TapNav.back(mm);
 						reply(out, "OK menu");
+						break;
+					case "EXITGAME":   // legacy: direct leave-to-list (no confirm)
+						Emulator.resume();
+						TapNav.esc();
+						reply(out, "OK exitgame");
 						break;
 					default:
 						reply(out, "ERR unknown cmd " + tk[1]);

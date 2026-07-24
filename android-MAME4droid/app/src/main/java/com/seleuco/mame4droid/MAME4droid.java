@@ -352,6 +352,8 @@ public class MAME4droid extends Activity {
 		Log.d("EMULATOR", "onResume " + this);
 		super.onResume();
 
+		com.seleuco.mame4droid.tapmame.TapNav.setTop(this);
+
 		if (prefsHelper != null)
 			prefsHelper.resume();
 
