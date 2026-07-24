@@ -45,6 +45,13 @@ class PadView(
         set(v) { field = v; postInvalidate() }
     var gameText = ""
         set(v) { field = v; postInvalidate() }
+    /** A transient notice (ROM stored, upload failed). Drawn in the pad itself
+     *  rather than as a system toast: toasts QUEUE, so a couple of uploads left
+     *  several stacked up playing one after another and the last one sat on
+     *  screen long after it stopped being true. Setting this replaces whatever
+     *  was there, and the host clears it on a timer. */
+    var noticeText = ""
+        set(v) { field = v; postInvalidate() }
     /** Vibrate on control presses (toggle in the ⚙ menu). */
     var haptics = true
     /** What the pad currently drives on the glasses: game|frontend|android|menu. */
@@ -182,6 +189,11 @@ class PadView(
             val hy = if (height > width) height * 0.30f else height * 0.28f
             text.textSize = minOf(width, height) * 0.03f; text.color = 0xFF7FA8CC.toInt()
             c.drawText(hint, width / 2f, hy, text)
+        }
+        if (noticeText.isNotEmpty()) {
+            text.textSize = minOf(width, height) * 0.038f
+            text.color = 0xFFE8C660.toInt()
+            c.drawText(noticeText, width / 2f, height * 0.955f, text)
         }
         text.textSize = minOf(width, height) * 0.032f; text.color = 0xFF9AA4AE.toInt()
         val line = buildString {

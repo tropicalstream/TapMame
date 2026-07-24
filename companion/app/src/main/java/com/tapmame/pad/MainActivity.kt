@@ -261,7 +261,7 @@ class MainActivity : Activity(), LinkClient.Listener {
                 ui.postDelayed({ retryRom() }, 3500)
                 return@runOnUiThread
             }
-            Toast.makeText(this, if (ok) "ROM stored: $msg" else "ROM failed: $msg", Toast.LENGTH_LONG).show()
+            notice(if (ok) "ROM stored: $msg" else "ROM failed: $msg")
             pad.statusText = if (link.isConnected) "glasses linked" else "searching for glasses…"
         }
     }
@@ -282,10 +282,24 @@ class MainActivity : Activity(), LinkClient.Listener {
         link.sendRom(lastRomName, size, stream)
     }
 
+    // ---- one notice channel, so messages never queue up behind each other
+    private val clearNotice = Runnable { pad.noticeText = "" }
+
+    /** Show a transient message for 8 seconds. A newer message REPLACES the
+     *  older one instead of waiting behind it (which is what left "topgunnr.zip
+     *  stored…" sitting on screen long after it was news). */
+    private fun notice(text: String) {
+        runOnUiThread {
+            pad.noticeText = text
+            ui.removeCallbacks(clearNotice)
+            ui.postDelayed(clearNotice, 8000)
+        }
+    }
+
     override fun onServerMsg(msg: String) {
         // native notifications from the glasses (netplay errors, version
         // mismatch, disconnects) mirrored to the player's hand
-        runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+        notice(msg)
     }
 
     override fun onNav(mode: String) {
