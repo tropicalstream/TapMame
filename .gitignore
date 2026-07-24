@@ -4,3 +4,6 @@ android-MAME4droid/app/src/main/jniLibs/
 android-MAME4droid/local.properties
 android-MAME4droid/app/build/
 android-MAME4droid/.gradle/
+companion/local.properties
+companion/app/build/
+companion/.gradle/
