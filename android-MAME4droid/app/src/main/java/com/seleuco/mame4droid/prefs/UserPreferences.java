@@ -125,6 +125,16 @@ public class UserPreferences extends PreferenceActivity implements OnSharedPrefe
 
 		super.onCreate(savedInstanceState);
 
+		// TapMame: on the SBS panel a full-width activity straddles the eye
+		// boundary; constrain the settings window to the left eye so it is
+		// readable through the glasses.
+		try {
+			android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+			lp.gravity = android.view.Gravity.LEFT | android.view.Gravity.FILL_VERTICAL;
+			lp.width = 640;
+			getWindow().setAttributes(lp);
+		} catch (Exception ignored) {}
+
 		addPreferencesFromResource(R.xml.userpreferences);
 
 		settings = PreferenceManager.getDefaultSharedPreferences(this);

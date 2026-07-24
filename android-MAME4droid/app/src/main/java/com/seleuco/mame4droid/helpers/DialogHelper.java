@@ -239,11 +239,8 @@ public class DialogHelper {
 				final String sSave = mm.getString(R.string.opt_save_state);
 				final String sNetplay = mm.getString(R.string.netplay);
 				final String sSettings = mm.getString(R.string.opt_settings);
+				final String sGameSettings = mm.getString(R.string.opt_game_settings);
 				final String sKeyboard = mm.getString(R.string.opt_keyboard);
-				CharSequence[] items1 = {sHelp, sLoad, sSave, sNetplay, sSettings, sKeyboard};
-				CharSequence[] items2 = {sHelp, sNetplay, sSettings, sKeyboard};
-				CharSequence[] items3 = {sExit, sHelp, sLoad, sSave, sNetplay, sSettings, sKeyboard};
-				CharSequence[] items4 = {sExit, sHelp, sNetplay, sSettings, sKeyboard};
 
 				boolean saveload = Emulator.isInGameButNotInMenu() && Emulator.getValue(Emulator.PAUSE)!=1;
 				/* Help only makes sense in the frontend (browsing ROMs, nothing
@@ -254,38 +251,37 @@ public class DialogHelper {
 				final boolean inGame = Emulator.isInGame();
 
 				final int a = id == DIALOG_FULLSCREEN ? 0 : 1;
-				final int b =  saveload ? 0 : 2;
-				final int c =  inGame ? 1 : 0;
 
 				if (a == 1)
 					builder.setTitle(mm.getString(R.string.menu_choose_option));
 
-				CharSequence[] items = saveload ? (id == DIALOG_OPTIONS ? items1 : items3) : (id == DIALOG_OPTIONS ? items2 : items4);
-
-				if (inGame) {
-					CharSequence[] filtered = new CharSequence[items.length - 1];
-					int w = 0;
-					for (CharSequence it : items)
-						if (!sHelp.equals(it)) filtered[w++] = it;
-					items = filtered;
-				}
-
+				/* TapMame: the menu is built as a label list and dispatched by
+				 * label — the upstream positional (a/b/c offset) dispatch broke
+				 * every time an entry was added. "Game Settings" opens MAME's
+				 * own in-game menu (TAB): DIP switches, per-game inputs,
+				 * sliders — rendered in-frame, so it's SBS on the glasses. */
+				java.util.ArrayList<CharSequence> list = new java.util.ArrayList<>();
+				if (a == 0) list.add(sExit);
+				if (!inGame) list.add(sHelp);
+				if (saveload) { list.add(sLoad); list.add(sSave); }
+				if (inGame) list.add(sGameSettings);
+				list.add(sNetplay);
+				list.add(sSettings);
 				boolean notKeyboard = !mm.getPrefsHelper().isVirtualKeyboardEnabled() || mm.getInputHandler().getKeyboard().isKeyboardConnected() || mm.getMainHelper().isAndroidTV();
+				if (!notKeyboard) list.add(sKeyboard);
 
-				if(notKeyboard)
-					items = Arrays.copyOf(items, items.length-1);
+				final CharSequence[] items = list.toArray(new CharSequence[0]);
 
 				builder.setCancelable(true);
 				builder.setItems(items, new DialogInterface.OnClickListener() {
 					public void onClick(DialogInterface dialog, int item) {
 
-						if (item == 0 && a == 0) {
-
+						CharSequence sel = items[item];
+						if (sExit.equals(sel)) {
 							mm.showDialog(DialogHelper.DIALOG_EXIT);
-
-						} else if (item == 1 - a && c == 0) {
+						} else if (sHelp.equals(sel)) {
 							mm.getMainHelper().showHelp();
-						} else if (item == 2 - a - c && b == 0) {
+						} else if (sLoad.equals(sel)) {
 							Emulator.resume();
 							Emulator.setValue(Emulator.LOADSTATE, 1);
 							Emulator.setSaveorload(true);
@@ -294,7 +290,7 @@ public class DialogHelper {
 							} catch (InterruptedException e) {
 							}
 							Emulator.setValue(Emulator.LOADSTATE, 0);
-						} else if (item == 3 - a - c && b == 0) {
+						} else if (sSave.equals(sel)) {
 							Emulator.resume();
 							Emulator.setValue(Emulator.SAVESTATE, 1);
 							Emulator.setSaveorload(true);
@@ -303,11 +299,14 @@ public class DialogHelper {
 							} catch (InterruptedException e) {
 							}
 							Emulator.setValue(Emulator.SAVESTATE, 0);
-						} else if (item == 4 - a - b - c) {
+						} else if (sGameSettings.equals(sel)) {
+							Emulator.resume();
+							com.seleuco.mame4droid.tapmame.LinkServer.openGameMenu(mm);
+						} else if (sNetplay.equals(sel)) {
 							mm.getNetPlay().createDialog();
-						} else if (item == 5 - a - b - c) {
+						} else if (sSettings.equals(sel)) {
 							mm.getMainHelper().showSettings();
-						} else if (item == 6 - a - b - c) {
+						} else if (sKeyboard.equals(sel)) {
 							((IEmuView) mm.getEmuView()).showSoftKeyboard();
 							Emulator.resume();
 						}
@@ -364,8 +363,25 @@ public class DialogHelper {
 	    {
 	    	dialog.setCanceledOnTouchOutside(false);
 	    }*/
+		fitLeftEye(dialog);
 		return dialog;
 
+	}
+
+	/**
+	 * TapMame: Android dialogs float over the SBS panel un-duplicated, so a
+	 * centered dialog straddles the eye boundary and is unreadable through
+	 * the glasses. Until dialogs are rendered in-frame, constrain them to
+	 * the left eye (640px half) so at least one eye reads them whole.
+	 */
+	private void fitLeftEye(Dialog d) {
+		if (d == null || d.getWindow() == null) return;
+		if (mm.getPrefsHelper() == null || !mm.getPrefsHelper().isSbsEnabled()) return;
+		android.view.WindowManager.LayoutParams lp = d.getWindow().getAttributes();
+		lp.gravity = android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL;
+		lp.width = 560;
+		lp.x = 0;
+		d.getWindow().setAttributes(lp);
 	}
 
 	public void prepareDialog(int id, Dialog dialog) {

@@ -19,7 +19,11 @@ import kotlin.math.hypot
  *
  * Bit values mirror MAME4droid's IController.
  */
-class PadView(context: Context, private val onMask: (Long) -> Unit) : View(context) {
+class PadView(
+    context: Context,
+    private val onMask: (Long) -> Unit,
+    private val onMenu: () -> Unit
+) : View(context) {
 
     companion object {
         const val UP = 0x1L; const val LEFT = 0x4L; const val DOWN = 0x10L; const val RIGHT = 0x40L
@@ -54,6 +58,7 @@ class PadView(context: Context, private val onMask: (Long) -> Unit) : View(conte
     private val svc = arrayOf(Svc("COIN", COIN), Svc("START", START), Svc("MENU", OPTION), Svc("EXIT", EXIT))
 
     private val btnRects = Array(6) { RectF() }
+    private val gearRect = RectF()
     private var stickCx = 0f; private var stickCy = 0f; private var stickR = 0f
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
@@ -63,6 +68,7 @@ class PadView(context: Context, private val onMask: (Long) -> Unit) : View(conte
             val x = w * 0.5f + (i - 2) * (svcW + 12f) + 6f
             s.rect.set(x, 10f, x + svcW, svcH)
         }
+        gearRect.set(14f, 10f, 14f + svcH * 1.2f, svcH)
         stickCx = w * 0.22f; stickCy = h * 0.58f; stickR = minOf(w, h) * 0.30f
         layoutButtons(w, h)
     }
@@ -84,6 +90,13 @@ class PadView(context: Context, private val onMask: (Long) -> Unit) : View(conte
         // status strip
         text.textSize = height * 0.045f; text.color = 0xFF9AA4AE.toInt()
         c.drawText(statusText + if (gameText.isNotEmpty()) "  ·  $gameText" else "", width / 2f, height * 0.99f, text)
+        // menu gear
+        fill.color = 0xFF232B33.toInt()
+        c.drawRoundRect(gearRect, 14f, 14f, fill)
+        stroke.color = 0xFF3A454F.toInt()
+        c.drawRoundRect(gearRect, 14f, 14f, stroke)
+        text.textSize = gearRect.height() * 0.52f; text.color = Color.WHITE
+        c.drawText("⚙", gearRect.centerX(), gearRect.centerY() + text.textSize * 0.35f, text)
         // service row
         for (s in svc) {
             fill.color = 0xFF232B33.toInt()
@@ -139,6 +152,7 @@ class PadView(context: Context, private val onMask: (Long) -> Unit) : View(conte
     }
 
     private fun down(pid: Int, x: Float, y: Float) {
+        if (gearRect.contains(x, y)) { onMenu(); return }
         for (s in svc) if (s.rect.contains(x, y)) { heldButtons[pid] = s.bit; push(); return }
         for (i in 0 until buttonCount) if (btnRects[i].contains(x, y)) { heldButtons[pid] = BTN[i]; push(); return }
         if (hypot(x - stickCx, y - stickCy) <= stickR * 1.35f) {

@@ -24,6 +24,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         fun onLinkState(connected: Boolean, host: String?)
         fun onGame(game: String)
         fun onRomResult(ok: Boolean, msg: String)
+        fun onServerMsg(msg: String)
     }
 
     companion object {
@@ -133,6 +134,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                 when {
                     line.startsWith("GAME ") -> listener.onGame(line.substring(5).trim())
                     line == "GAME" -> listener.onGame("")
+                    line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
+                    line.startsWith("OK gamemenu") || line.startsWith("OK settings") -> {}
                     line.startsWith("OK ") -> listener.onRomResult(true, line.substring(3))
                     line.startsWith("ERR ") -> listener.onRomResult(false, line.substring(4))
                 }
@@ -154,6 +157,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
 
     fun sendPad(mask: Long) { if (running) outQueue.offer("PAD 0 $mask") }
     fun queryGame() { if (running) outQueue.offer("GAME?") }
+    fun openGameSettings() { if (running) outQueue.offer("CMD GAMEMENU") }
+    fun openGlobalSettings() { if (running) outQueue.offer("CMD SETTINGS") }
     fun sendRom(name: String, size: Long, stream: InputStream) {
         if (running) outQueue.offer(RomJob(name, size, stream))
         else listener.onRomResult(false, "not connected")

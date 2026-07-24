@@ -45,10 +45,16 @@ public class LinkServer {
 	public static final int PORT = 19999;
 	private static final String TAG = "TapMameLink";
 
+	/** Rom/game name captured on launch (intent path); "" when unknown. */
+	public static volatile String currentGame = "";
+
+	private static volatile LinkServer instance;
+
 	private final MAME4droid mm;
 	private ServerSocket server;
 	private Thread thread;
 	private volatile boolean running;
+	private volatile OutputStream clientOut;
 	private NsdManager nsd;
 	private NsdManager.RegistrationListener nsdListener;
 
@@ -56,9 +62,36 @@ public class LinkServer {
 		this.mm = mm;
 	}
 
+	/** Fire-and-forget line to the connected companion (no-op when none). */
+	public static void push(String line) {
+		LinkServer s = instance;
+		if (s == null) return;
+		OutputStream out = s.clientOut;
+		if (out == null) return;
+		try {
+			synchronized (out) {
+				out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+				out.flush();
+			}
+		} catch (IOException ignored) {}
+	}
+
+	/**
+	 * Open MAME's own in-game menu (TAB): DIP switches, per-game inputs,
+	 * sliders. Rendered inside the emulator frame, i.e. SBS on the glasses.
+	 */
+	public static void openGameMenu(MAME4droid mm) {
+		new Thread(() -> {
+			Emulator.setKeyData(android.view.KeyEvent.KEYCODE_TAB, Emulator.KEY_DOWN, (char) 0);
+			try { Thread.sleep(120); } catch (InterruptedException ignored) {}
+			Emulator.setKeyData(android.view.KeyEvent.KEYCODE_TAB, Emulator.KEY_UP, (char) 0);
+		}, "TapMameTab").start();
+	}
+
 	public synchronized void start() {
 		if (running) return;
 		running = true;
+		instance = this;
 		thread = new Thread(this::run, "TapMameLink");
 		thread.setDaemon(true);
 		thread.start();
@@ -67,6 +100,7 @@ public class LinkServer {
 
 	public synchronized void stop() {
 		running = false;
+		if (instance == this) instance = null;
 		try { if (server != null) server.close(); } catch (IOException ignored) {}
 		if (nsd != null && nsdListener != null) {
 			try { nsd.unregisterService(nsdListener); } catch (Exception ignored) {}
@@ -117,18 +151,23 @@ public class LinkServer {
 	private void serve(Socket s) throws IOException {
 		InputStream in = new BufferedInputStream(s.getInputStream());
 		OutputStream out = new BufferedOutputStream(s.getOutputStream());
-		StringBuilder sb = new StringBuilder(96);
-		int c;
-		while (running && (c = in.read()) != -1) {
-			if (c != '\n') { sb.append((char) c); continue; }
-			String line = sb.toString().trim();
-			sb.setLength(0);
-			if (line.isEmpty()) continue;
-			try {
-				handle(line, in, out);
-			} catch (Exception e) {
-				reply(out, "ERR " + e.getMessage());
+		clientOut = out;
+		try {
+			StringBuilder sb = new StringBuilder(96);
+			int c;
+			while (running && (c = in.read()) != -1) {
+				if (c != '\n') { sb.append((char) c); continue; }
+				String line = sb.toString().trim();
+				sb.setLength(0);
+				if (line.isEmpty()) continue;
+				try {
+					handle(line, in, out);
+				} catch (Exception e) {
+					reply(out, "ERR " + e.getMessage());
+				}
 			}
+		} finally {
+			clientOut = null;
 		}
 	}
 
@@ -152,9 +191,29 @@ public class LinkServer {
 				break;
 			}
 			case "GAME?": {
-				String name = null;
-				try { name = Emulator.getValueStr(Emulator.ROM_NAME); } catch (Exception ignored) {}
+				// getValueStr(ROM_NAME) is a set-only key upstream, so the
+				// name comes from the Java-side launch capture; a game booted
+				// from MAME's own frontend reports "(running)" until a native
+				// current-machine export exists.
+				String name = currentGame;
+				if ((name == null || name.isEmpty()) && Emulator.isInGame()) name = "(running)";
 				reply(out, "GAME " + (name == null ? "" : name));
+				break;
+			}
+			case "CMD": {
+				switch (tk[1]) {
+					case "GAMEMENU":
+						Emulator.resume();
+						openGameMenu(mm);
+						reply(out, "OK gamemenu");
+						break;
+					case "SETTINGS":
+						mm.runOnUiThread(() -> mm.getMainHelper().showSettings());
+						reply(out, "OK settings");
+						break;
+					default:
+						reply(out, "ERR unknown cmd " + tk[1]);
+				}
 				break;
 			}
 			case "ROM": {

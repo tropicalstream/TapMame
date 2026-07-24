@@ -33,14 +33,8 @@ class MainActivity : Activity(), LinkClient.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         link = LinkClient(this, this)
-        pad = PadView(this) { mask ->
-            // OPTION long-form: the MENU service button doubles as the
-            // actions dialog when tapped together with EXIT — keep simple:
-            link.sendPad(mask)
-        }
+        pad = PadView(this, { mask -> link.sendPad(mask) }, { actionsDialog() })
         setContentView(pad)
-        pad.setOnLongClickListener { actionsDialog(); true }
-        pad.isLongClickable = true
     }
 
     override fun onResume() {
@@ -82,17 +76,30 @@ class MainActivity : Activity(), LinkClient.Listener {
         }
     }
 
+    override fun onServerMsg(msg: String) {
+        // native notifications from the glasses (netplay errors, version
+        // mismatch, disconnects) mirrored to the player's hand
+        runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+    }
+
     // ------------------------------------------------------------ actions
 
     private fun actionsDialog() {
-        val items = arrayOf("Send ROM to glasses…", "Enter glasses IP…", "Reconnect")
+        val items = arrayOf(
+            "Game settings (DIPs, inputs) on glasses",
+            "Global MAME settings on glasses",
+            "Send ROM to glasses…",
+            "Enter glasses IP…",
+            "Reconnect")
         AlertDialog.Builder(this)
             .setTitle("TapMame Pad")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> pickRom()
-                    1 -> ipDialog()
-                    2 -> { link.disconnect(); link.startDiscovery() }
+                    0 -> link.openGameSettings()
+                    1 -> link.openGlobalSettings()
+                    2 -> pickRom()
+                    3 -> ipDialog()
+                    4 -> { link.disconnect(); link.startDiscovery() }
                 }
             }.show()
     }

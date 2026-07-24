@@ -964,6 +964,7 @@ public class Emulator {
 							gameSelected = gameSelected.substring(0, gameSelected.length() - 3);
 						}
 						Emulator.setValueStr(Emulator.GAME_SELECTED, gameSelected);
+						com.seleuco.mame4droid.tapmame.LinkServer.currentGame = gameSelected;
 
 						Log.d("ACTION_VIEW","XX name: " + fileName);
 						Log.d("ACTION_VIEW","XX path: " + path);
@@ -1188,6 +1189,14 @@ public class Emulator {
 	}
 
 	static void netplayWarn(final String msg) {
+		// TapMame: mirror every native notification (netplay errors, version
+		// mismatch, disconnects...) to the companion phone as a toast line.
+		if (msg != null && !msg.startsWith("STATS:")) {
+			String plain = msg;
+			for (String p : new String[]{"TOASTERR:", "TOASTOK:", "TOAST:"})
+				if (plain.startsWith(p)) { plain = plain.substring(p.length()); break; }
+			com.seleuco.mame4droid.tapmame.LinkServer.push("MSG " + resolveNpMsg(plain));
+		}
 		mm.runOnUiThread(new Runnable() {
 			public void run() {
 				if (msg != null && msg.startsWith("TOASTERR:")) {
