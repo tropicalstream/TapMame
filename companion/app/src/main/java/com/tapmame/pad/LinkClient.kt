@@ -91,6 +91,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         disconnect()
         running = true
         writer = Thread {
+            var activeRom: RomJob? = null
             try {
                 val s = Socket()
                 s.tcpNoDelay = true
@@ -106,6 +107,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                             out.flush()
                         }
                         is RomJob -> {
+                            activeRom = item
                             out.write(("ROM ${item.name} ${item.size}\n").toByteArray())
                             val buf = ByteArray(65536)
                             var left = item.size
@@ -117,11 +119,19 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                             }
                             out.flush()
                             item.stream.close()
+                            activeRom = null
+                            // the server's OK/ERR reply arrives via readLoop
                         }
                     }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "link lost: $e")
+                // an upload dying mid-transfer must be REPORTED, not silent —
+                // the pad showed 'Sending…' forever while the socket was dead
+                activeRom?.let {
+                    try { it.stream.close() } catch (_: Exception) {}
+                    listener.onRomResult(false, "${it.name}: connection lost — try again")
+                }
             } finally {
                 running = false
                 try { socket?.close() } catch (_: Exception) {}
@@ -157,7 +167,14 @@ class LinkClient(private val context: Context, private val listener: Listener) {
 
     fun disconnect() {
         running = false
-        outQueue.clear()
+        // report queued uploads instead of silently dropping them
+        while (true) {
+            val item = outQueue.poll() ?: break
+            if (item is RomJob) {
+                try { item.stream.close() } catch (_: Exception) {}
+                listener.onRomResult(false, "${item.name}: not sent — reconnect and retry")
+            }
+        }
         outQueue.offer("")   // unblock the writer's take()
         try { socket?.close() } catch (_: Exception) {}
         socket = null

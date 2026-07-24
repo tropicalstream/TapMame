@@ -398,8 +398,19 @@ public class LinkServer {
 		}
 		if (tmp.renameTo(f)) {
 			reply(out, "OK " + name);
-			push("MSG ROM stored: " + name);
 			Log.i(TAG, "ROM stored: " + f + " (" + size + " bytes)");
+			// The frontend builds its game list at startup, so a new romset
+			// stays invisible until a rescan. When we're just browsing the
+			// list, restart the app now so the game appears immediately;
+			// mid-game we don't interrupt — it shows up next restart.
+			if (!Emulator.isInGameButNotInMenu()) {
+				push("MSG ROM stored: " + name + " — refreshing game list…");
+				// small delay lets the OK reply + MSG flush to the phone first
+				new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+					() -> mm.getMainHelper().restartApp(), 500);
+			} else {
+				push("MSG ROM stored: " + name + " — it will appear after the game list reloads");
+			}
 		} else {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();
