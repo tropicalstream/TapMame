@@ -74,10 +74,29 @@ class MainActivity : Activity(), LinkClient.Listener {
 
     // ------------------------------------------------------------ link
 
+    @Volatile private var restarting = false
+    private val clearRestarting = Runnable { restarting = false; pad.statusText = "searching for glasses…" }
+
     override fun onLinkState(connected: Boolean, host: String?) {
         runOnUiThread {
-            pad.statusText = if (connected) "glasses: $host" else "searching for glasses… (long-press for manual IP)"
-            if (!connected) link.startDiscovery()
+            pad.statusText = when {
+                connected -> { restarting = false; ui.removeCallbacks(clearRestarting); "glasses: $host" }
+                restarting -> "glasses reloading games — reconnecting…"
+                else -> "searching for glasses… (long-press for manual IP)"
+            }
+            if (!connected) link.startDiscovery()   // keep-trying loop (idempotent)
+        }
+    }
+
+    override fun onRestarting() {
+        // the glasses are doing a clean restart to rebuild the game list; the
+        // link will drop for a few seconds and the reconnect loop will rejoin
+        restarting = true
+        runOnUiThread {
+            pad.statusText = "glasses restarting to load games…"
+            Toast.makeText(this, "Loading games on glasses — reconnecting…", Toast.LENGTH_SHORT).show()
+            ui.removeCallbacks(clearRestarting)
+            ui.postDelayed(clearRestarting, 30000)   // don't imply a reload forever
         }
     }
 

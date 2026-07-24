@@ -97,6 +97,13 @@ public class LinkServer {
 	 * A short delay lets the OK/MSG replies flush to the phone first.
 	 */
 	public static void reloadGameList(final MAME4droid mm) {
+		// Tell any connected companion the link is about to drop and will come
+		// back, so it shows a friendly "reconnecting" state and auto-rejoins
+		// instead of looking frozen on "Reloading…". push() writes to a socket,
+		// so it MUST run off the main thread — reloadGameList is also called from
+		// the glasses menu (UI thread), where a direct push crashed with
+		// NetworkOnMainThreadException. The 400ms delay lets it flush first.
+		new Thread(() -> push("RESTARTING"), "TapMameRestartMsg").start();
 		new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
 			try {
 				android.content.Intent i = new android.content.Intent(mm, RestartActivity.class);
@@ -109,10 +116,13 @@ public class LinkServer {
 		}, 400);
 	}
 
+	private android.net.wifi.WifiManager.WifiLock wifiLock;
+
 	public synchronized void start() {
 		if (running) return;
 		running = true;
 		instance = this;
+		acquireWifiLock();
 		thread = new Thread(this::run, "TapMameLink");
 		thread.setDaemon(true);
 		thread.start();
@@ -122,11 +132,40 @@ public class LinkServer {
 	public synchronized void stop() {
 		running = false;
 		if (instance == this) instance = null;
+		releaseWifiLock();
 		try { if (server != null) server.close(); } catch (IOException ignored) {}
 		if (nsd != null && nsdListener != null) {
 			try { nsd.unregisterService(nsdListener); } catch (Exception ignored) {}
 			nsdListener = null;
 		}
+	}
+
+	/**
+	 * Keep the Wi-Fi radio out of power-save while the link is up. The X3's
+	 * radio dozes aggressively when the app isn't actively pushing packets, and
+	 * a dozed radio silently drops the companion's pad packets / ROM transfers
+	 * (they time out) — which read as "can't find the glasses" or a stalled
+	 * upload. A high-perf / low-latency WifiLock holds it awake.
+	 */
+	private void acquireWifiLock() {
+		try {
+			android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+				mm.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+			if (wm == null) return;
+			int mode = android.os.Build.VERSION.SDK_INT >= 29
+				? android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+				: android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+			wifiLock = wm.createWifiLock(mode, "TapMame:link");
+			wifiLock.setReferenceCounted(false);
+			wifiLock.acquire();
+		} catch (Exception e) {
+			Log.w(TAG, "wifi lock: " + e);
+		}
+	}
+
+	private void releaseWifiLock() {
+		try { if (wifiLock != null && wifiLock.isHeld()) wifiLock.release(); } catch (Exception ignored) {}
+		wifiLock = null;
 	}
 
 	private void registerNsd() {
@@ -316,8 +355,8 @@ public class LinkServer {
 					case "RELOAD":
 						// clean, reliable whole-app restart so MAME re-audits the
 						// rompath and newly uploaded games appear in the list
+						// (reloadGameList pushes RESTARTING so the phone reconnects)
 						reply(out, "OK reload");
-						push("MSG Reloading game list…");
 						reloadGameList(mm);
 						break;
 					default:
