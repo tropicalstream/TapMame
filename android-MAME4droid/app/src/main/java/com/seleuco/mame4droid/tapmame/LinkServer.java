@@ -57,6 +57,11 @@ public class LinkServer {
 	private volatile boolean running;
 	private volatile OutputStream clientOut;
 	private volatile Socket clientSocket;
+	// menu-scroll state: lets an analog surface (paddle/dial/trackball) scroll
+	// the game list when there's no game to drive
+	private final android.os.Handler scrollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+	private volatile long analogScrollStamp = 0;
+	private int curScrollDir = 0;
 	private NsdManager nsd;
 	private NsdManager.RegistrationListener nsdListener;
 
@@ -296,7 +301,20 @@ public class LinkServer {
 				// paddle/dial/wheel/trackball internally.
 				int type = Integer.parseInt(tk[1]);
 				int i = Integer.parseInt(tk[2]);
-				Emulator.setAnalogData(type, i, Float.parseFloat(tk[3]), Float.parseFloat(tk[4]));
+				float ax = Float.parseFloat(tk[3]);
+				float ay = Float.parseFloat(tk[4]);
+				// Outside a running game the analog surface has no game to drive —
+				// feeding it to MAME just nudges the frontend's side panels
+				// (Images/Info) and the player gets stuck there. Repurpose it to
+				// SCROLL the game list so a paddle-only layout can still pick a
+				// game (A/START still selects via the PAD handler).
+				GlassesUi aui = mm.getGlassesUi();
+				boolean menuLike = (aui != null && aui.isMenuVisible())
+					|| TapNav.androidNavActive()
+					|| !Emulator.isInGame() || Emulator.isInMenu() || TapNav.inQuitConfirm();
+				if (menuLike) { analogMenuScroll(ax, ay); break; }
+				if (curScrollDir != 0) setMenuScrollDir(0);   // left the menu — stop scrolling
+				Emulator.setAnalogData(type, i, ax, ay);
 				break;
 			}
 			case "KEY": {
@@ -420,6 +438,40 @@ public class LinkServer {
 				break;
 			default:
 				reply(out, "ERR unknown " + tk[0]);
+		}
+	}
+
+	/**
+	 * Use an analog surface to scroll the game list / a menu. The surface holds
+	 * its position (a paddle doesn't recentre), so we can't rely on a "released"
+	 * event: while the player is actively moving it we hold the matching
+	 * joystick direction (MAME auto-repeats the scroll), and an inactivity
+	 * timeout releases it once the readings stop changing. Right/down = forward.
+	 */
+	private void analogMenuScroll(float x, float y) {
+		float v = Math.abs(y) > Math.abs(x) ? y : x;
+		final int dir = v > 0.4f ? 1 : (v < -0.4f ? -1 : 0);
+		final long stamp = android.os.SystemClock.uptimeMillis();
+		analogScrollStamp = stamp;
+		setMenuScrollDir(dir);
+		if (dir != 0) scrollHandler.postDelayed(
+			() -> { if (analogScrollStamp == stamp) setMenuScrollDir(0); }, 200);
+	}
+
+	private void setMenuScrollDir(int dir) {
+		if (dir == curScrollDir) return;
+		curScrollDir = dir;
+		GlassesUi ui = mm.getGlassesUi();
+		if (ui != null && ui.isMenuVisible()) {
+			if (dir != 0) { final int d = dir; mm.runOnUiThread(() -> ui.menuMove(d)); }
+		} else if (TapNav.androidNavActive()) {
+			if (dir != 0) TapNav.androidKey(mm, dir < 0
+				? android.view.KeyEvent.KEYCODE_DPAD_UP : android.view.KeyEvent.KEYCODE_DPAD_DOWN);
+		} else {
+			// MAME frontend / TAB menu: hold the joystick direction; MAME's UI
+			// auto-repeats the scroll, exactly like the digital pad does.
+			final long UP = 0x1L, DOWN = 0x10L;
+			Emulator.setDigitalData(0, dir < 0 ? UP : dir > 0 ? DOWN : 0L);
 		}
 	}
 
