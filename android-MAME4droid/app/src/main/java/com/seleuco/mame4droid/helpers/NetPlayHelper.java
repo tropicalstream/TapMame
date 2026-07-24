@@ -287,6 +287,9 @@ public class NetPlayHelper {
         prepareButtons();
 
         netplayDlg.show();
+        // TapMame: pin to the left eye so it's readable through the glasses
+        // instead of straddling the SBS boundary
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, netplayDlg);
     }
 
     protected static boolean isIPv4Address(final String input) {
@@ -488,7 +491,7 @@ public class NetPlayHelper {
         SharedPreferences sp = mm.getPrefsHelper().getSharedPreferences();
         rollbackMode = sp.getBoolean(PREF_NETPLAY_ROLLBACK_MODE, false);
 
-        new AlertDialog.Builder(mm)
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, new AlertDialog.Builder(mm)
             .setTitle(mm.getString(R.string.np_mode_title))
             .setSingleChoiceItems(
                 new String[]{mm.getString(R.string.np_mode_lockstep), mm.getString(R.string.np_mode_rollback)},
@@ -510,7 +513,7 @@ public class NetPlayHelper {
                 }
             })
             .setNegativeButton(mm.getString(R.string.cancel), null)
-            .show();
+            .show());
     }
 
     /* Hosting goes straight to the waiting dialog: the punch target (hole
@@ -598,7 +601,7 @@ public class NetPlayHelper {
             }
         });
         alert.setNegativeButton(mm.getString(R.string.cancel), null);
-        alert.show();
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, alert.show());
     }
 
     /* "host[:port]" -> {host, portStr|null}.  "[v6]:port" unwraps its
@@ -804,10 +807,10 @@ public class NetPlayHelper {
      * draws on the activity frame, BEHIND dialogs, so it would be hidden.  An
      * AlertDialog has its own window and sits on top.  UI thread only. */
     private void showNetplayError(String msg) {
-        new AlertDialog.Builder(mm)
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, new AlertDialog.Builder(mm)
                 .setMessage(msg)
                 .setPositiveButton(android.R.string.ok, null)
-                .show();
+                .show());
     }
 
     /* UPnP SOAP calls are network I/O: never on the UI thread. */
@@ -973,6 +976,7 @@ public class NetPlayHelper {
             AlertDialog dlg = alert.create();
             dlg.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
             dlg.show();
+            com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, dlg);
         }
     };
 
@@ -1052,6 +1056,7 @@ public class NetPlayHelper {
         waitBld.setNeutralButton(mm.getString(R.string.np_btn_peer_ip), (DialogInterface.OnClickListener) null);
         progressDialog = waitBld.create();
         progressDialog.show();
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, progressDialog);
         final Button peerBtn = progressDialog.getButton(DialogInterface.BUTTON_NEUTRAL);
         if (peerBtn != null) {
             /* Off until init is done: a punch target set before the worker's
@@ -1334,6 +1339,7 @@ public class NetPlayHelper {
             joinBld.setPositiveButton(mm.getString(R.string.np_btn_share), (DialogInterface.OnClickListener) null);
         progressDialog = joinBld.create();
         progressDialog.show();
+        com.seleuco.mame4droid.helpers.DialogHelper.fitLeftEye(mm, progressDialog);
         Button shareBtn = progressDialog.getButton(DialogInterface.BUTTON_POSITIVE);
         if (shareBtn != null) {
             shareBtn.setOnClickListener(new View.OnClickListener() {

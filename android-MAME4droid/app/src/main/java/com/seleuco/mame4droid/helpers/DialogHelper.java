@@ -368,15 +368,20 @@ public class DialogHelper {
 
 	}
 
+	private void fitLeftEye(Dialog d) {
+		fitLeftEye(mm, d);
+	}
+
 	/**
 	 * TapMame: Android dialogs float over the SBS panel un-duplicated, so a
 	 * centered dialog straddles the eye boundary and is unreadable through
-	 * the glasses. Until dialogs are rendered in-frame, constrain them to
-	 * the left eye (640px half) so at least one eye reads them whole.
+	 * the glasses. Until dialogs are rendered in-frame, constrain any dialog
+	 * to the left eye (640px half) so at least one eye reads it whole. Static
+	 * so other helpers (NetPlay, etc.) can pin their own dialogs the same way.
 	 */
-	private void fitLeftEye(Dialog d) {
+	public static void fitLeftEye(MAME4droid mm, Dialog d) {
 		if (d == null || d.getWindow() == null) return;
-		if (mm.getPrefsHelper() == null || !mm.getPrefsHelper().isSbsEnabled()) return;
+		if (mm == null || mm.getPrefsHelper() == null || !mm.getPrefsHelper().isSbsEnabled()) return;
 		android.view.WindowManager.LayoutParams lp = d.getWindow().getAttributes();
 		lp.gravity = android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL;
 		lp.width = 560;
