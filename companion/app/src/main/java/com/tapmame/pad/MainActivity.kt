@@ -18,7 +18,7 @@ import kotlin.math.abs
 /**
  * TapMame Pad — the phone companion. Discovers the glasses on the LAN,
  * becomes the arcade controller, and pushes ROM files into the glasses'
- * roms folder. Long-press MENU (on the pad) for the actions dialog
+ * roms folder. The ⚙ gear (top-left of the pad) opens the actions dialog
  * (send ROM, reconnect, manual IP).
  */
 class MainActivity : Activity(), LinkClient.Listener {
@@ -187,7 +187,7 @@ class MainActivity : Activity(), LinkClient.Listener {
             pad.statusText = when {
                 connected -> { restarting = false; ui.removeCallbacks(clearRestarting); "glasses: $host" }
                 restarting -> "glasses reloading games — reconnecting…"
-                else -> "searching for glasses… (long-press for manual IP)"
+                else -> "searching for glasses… (⚙ for manual IP)"
             }
             if (!connected) link.startDiscovery()   // keep-trying loop (idempotent)
         }
