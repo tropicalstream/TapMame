@@ -85,6 +85,21 @@ public class MAME4droid extends Activity {
 	protected InputView inputView = null;
 
 	protected com.seleuco.mame4droid.tapmame.LinkServer linkServer = null;
+	protected com.seleuco.mame4droid.tapmame.GlassesUi glassesUi = null;
+
+	public com.seleuco.mame4droid.tapmame.GlassesUi getGlassesUi() { return glassesUi; }
+
+	@Override
+	public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+		// TapMame: the X3 temple double-tap arrives as BACK; route it to the
+		// SBS exit/menu overlay instead of the one-eyed Android dialog.
+		if (glassesUi != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
+			if (event.getAction() == android.view.KeyEvent.ACTION_UP)
+				glassesUi.onBackPressed();
+			return true;
+		}
+		return super.dispatchKeyEvent(event);
+	}
 
 	protected MainHelper mainHelper = null;
 	protected PrefsHelper prefsHelper = null;
@@ -268,6 +283,17 @@ public class MAME4droid extends Activity {
 
 		View frame = this.findViewById(R.id.EmulatorFrame);
 		frame.setOnTouchListener(inputHandler);
+
+		// TapMame: glasses UI on top of everything — SBS menus (both eyes)
+		// and temple-touchpad gestures (tap=select, swipe=navigate,
+		// long-press=menu). Only when the binocular presentation is active.
+		if (prefsHelper.isSbsEnabled()) {
+			if (glassesUi != null && glassesUi.getParent() != null)
+				((android.view.ViewGroup) glassesUi.getParent()).removeView(glassesUi);
+			glassesUi = new com.seleuco.mame4droid.tapmame.GlassesUi(this);
+			fl.addView(glassesUi, new FrameLayout.LayoutParams(
+				FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+		}
 
 		if (!getPrefsHelper().isNotchUsed() &&  Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
 			frame.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
