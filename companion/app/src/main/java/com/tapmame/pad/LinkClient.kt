@@ -29,6 +29,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         fun onNav(mode: String)
         fun onPref(key: String, value: String)
         fun onRestarting()      // glasses are restarting to reload the game list
+        fun onRoms(names: List<String>)                 // installed romsets
+        fun onRomDeleted(name: String, ok: Boolean, msg: String)
     }
 
     companion object {
@@ -263,6 +265,13 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     line == "GAME" -> listener.onGame("")
                     line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
                     line == "RESTARTING" -> listener.onRestarting()
+                    line == "ROMS" -> listener.onRoms(emptyList())
+                    line.startsWith("ROMS ") -> listener.onRoms(line.substring(5).split("|").filter { it.isNotBlank() })
+                    line.startsWith("DELOK ") -> listener.onRomDeleted(line.substring(6).trim(), true, "")
+                    line.startsWith("DELERR ") -> {
+                        val rest = line.substring(7)
+                        listener.onRomDeleted(rest.substringBefore(":").trim(), false, rest)
+                    }
                     line.startsWith("NPADDR") -> listener.onNpAddr(line.removePrefix("NPADDR").trim())
                     line.startsWith("NAV ") -> listener.onNav(line.substring(4).trim())
                     line.startsWith("PREF ") -> {
@@ -311,6 +320,8 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     fun exit() { if (running) outQueue.offer("CMD EXIT") }
     fun menu() { if (running) outQueue.offer("CMD MENU") }
     fun reloadGames() { if (running) outQueue.offer("CMD RELOAD") }
+    fun queryRoms() { if (running) outQueue.offer("ROMS?") }
+    fun deleteRom(name: String) { if (running) outQueue.offer("DEL $name") }
     fun sendRom(name: String, size: Long, stream: InputStream) {
         if (running) outQueue.offer(RomJob(name, size, stream))
         else listener.onRomResult(false, "not connected")

@@ -264,6 +264,73 @@ class MainActivity : Activity(), LinkClient.Listener {
 
     @Volatile private var npAddrWaiter: ((String) -> Unit)? = null
 
+    // -------------------------------------------------------- manage games
+
+    @Volatile private var romsWaiter: ((List<String>) -> Unit)? = null
+    private var gamesDeleted = false
+
+    override fun onRoms(names: List<String>) {
+        val cb = romsWaiter ?: return
+        romsWaiter = null
+        runOnUiThread { cb(names) }
+    }
+
+    override fun onRomDeleted(name: String, ok: Boolean, msg: String) {
+        runOnUiThread {
+            if (ok) {
+                gamesDeleted = true
+                Toast.makeText(this, "Deleted $name", Toast.LENGTH_SHORT).show()
+                manageGamesDialog()          // refresh the list so it shows it's gone
+            } else {
+                Toast.makeText(this, "Delete failed: $msg", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun manageGamesDialog() {
+        if (!link.isConnected) {
+            Toast.makeText(this, "Connect to the glasses first", Toast.LENGTH_SHORT).show(); return
+        }
+        romsWaiter = { list -> showManageGames(list) }
+        link.queryRoms()
+        // clear the waiter if the glasses never answer
+        ui.postDelayed({
+            if (romsWaiter != null) { romsWaiter = null
+                Toast.makeText(this, "No response from glasses", Toast.LENGTH_SHORT).show() }
+        }, 5000)
+    }
+
+    private fun showManageGames(list: List<String>) {
+        if (list.isEmpty()) {
+            Toast.makeText(this, "No games installed", Toast.LENGTH_SHORT).show()
+            reloadAfterManage(); return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Manage games — tap to delete")
+            .setItems(list.toTypedArray()) { _, which -> confirmDeleteGame(list[which]) }
+            .setNegativeButton("Close") { _, _ -> reloadAfterManage() }
+            .setOnCancelListener { reloadAfterManage() }
+            .show()
+    }
+
+    private fun confirmDeleteGame(name: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete $name?")
+            .setMessage("Removes the ROM from the glasses' storage. You can re-upload it later.")
+            .setPositiveButton("Delete") { _, _ -> link.deleteRom(name) }   // onRomDeleted refreshes
+            .setNegativeButton("Cancel") { _, _ -> manageGamesDialog() }     // back to the list
+            .show()
+    }
+
+    /** After deleting anything, restart the glasses app so MAME drops it from the list. */
+    private fun reloadAfterManage() {
+        if (gamesDeleted) {
+            gamesDeleted = false
+            link.reloadGames()
+            Toast.makeText(this, "Updating game list on glasses…", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ------------------------------------------------------------ actions
 
     private fun actionsDialog() {
@@ -277,6 +344,7 @@ class MainActivity : Activity(), LinkClient.Listener {
             "Send ROM from phone…",
             "Send ROM from NAS (SMB)…",
             "Reload game list on glasses",
+            "Manage games (delete)…",
             "Haptic feedback: ${if (hap) "ON" else "OFF"}",
             "Enter glasses IP…",
             "Reconnect")
@@ -297,13 +365,14 @@ class MainActivity : Activity(), LinkClient.Listener {
                         link.reloadGames()
                         Toast.makeText(this, "Reloading game list on glasses…", Toast.LENGTH_SHORT).show()
                     }
-                    8 -> {
+                    8 -> manageGamesDialog()
+                    9 -> {
                         pad.haptics = !hap
                         getSharedPreferences("pad", MODE_PRIVATE).edit().putBoolean("haptics", pad.haptics).apply()
                         Toast.makeText(this, "Haptics ${if (pad.haptics) "on" else "off"}", Toast.LENGTH_SHORT).show()
                     }
-                    9 -> ipDialog()
-                    10 -> { link.disconnect(); link.startDiscovery() }
+                    10 -> ipDialog()
+                    11 -> { link.disconnect(); link.startDiscovery() }
                 }
             }.show()
     }

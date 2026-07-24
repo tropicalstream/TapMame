@@ -433,11 +433,61 @@ public class LinkServer {
 				receiveRom(name, size, in, out);
 				break;
 			}
+			case "ROMS?":
+				// list the installed romsets so the phone can manage/delete them
+				reply(out, "ROMS " + listRomFiles());
+				break;
+			case "DEL": {
+				// DEL <name> — delete one romset from storage (full name after
+				// "DEL " so spaces in a filename survive the tokeniser)
+				String dn = line.length() > 4 ? line.substring(4).trim() : "";
+				deleteRomFile(dn, out);
+				break;
+			}
 			case "PING":
 				reply(out, "PONG TapMame");
 				break;
 			default:
 				reply(out, "ERR unknown " + tk[0]);
+		}
+	}
+
+	/** Where romsets live (per-game override, else the install dir). */
+	private String romsDir() {
+		String dir = mm.getPrefsHelper().getROMsDIR();
+		if (dir == null || dir.isEmpty())
+			dir = mm.getMainHelper().getInstallationDIR() + "roms";
+		return dir;
+	}
+
+	/** Pipe-separated list of installed romset files (.zip/.7z/.chd), sorted. */
+	private String listRomFiles() {
+		File[] fs = new File(romsDir()).listFiles();
+		if (fs == null) return "";
+		java.util.ArrayList<String> names = new java.util.ArrayList<>();
+		for (File f : fs) {
+			if (!f.isFile()) continue;
+			String low = f.getName().toLowerCase();
+			if (low.endsWith(".zip") || low.endsWith(".7z") || low.endsWith(".chd"))
+				names.add(f.getName());
+		}
+		java.util.Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
+		return String.join("|", names);
+	}
+
+	private void deleteRomFile(String name, OutputStream out) throws IOException {
+		// no path tricks from the wire, same guard as the upload path
+		if (name.isEmpty() || name.contains("/") || name.contains("\\") || name.contains("..")) {
+			reply(out, "DELERR " + name + ": bad name");
+			return;
+		}
+		File f = new File(romsDir(), name);
+		if (!f.exists()) { reply(out, "DELERR " + name + ": not found"); return; }
+		if (f.delete()) {
+			Log.i(TAG, "ROM deleted: " + f);
+			reply(out, "DELOK " + name);
+		} else {
+			reply(out, "DELERR " + name + ": could not delete");
 		}
 	}
 
