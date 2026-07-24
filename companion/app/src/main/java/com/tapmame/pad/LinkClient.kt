@@ -25,6 +25,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
         fun onGame(game: String)
         fun onRomResult(ok: Boolean, msg: String)
         fun onServerMsg(msg: String)
+        fun onNpAddr(addr: String)
     }
 
     companion object {
@@ -135,6 +136,7 @@ class LinkClient(private val context: Context, private val listener: Listener) {
                     line.startsWith("GAME ") -> listener.onGame(line.substring(5).trim())
                     line == "GAME" -> listener.onGame("")
                     line.startsWith("MSG ") -> listener.onServerMsg(line.substring(4))
+                    line.startsWith("NPADDR") -> listener.onNpAddr(line.removePrefix("NPADDR").trim())
                     line.startsWith("OK gamemenu") || line.startsWith("OK settings") -> {}
                     line.startsWith("OK ") -> listener.onRomResult(true, line.substring(3))
                     line.startsWith("ERR ") -> listener.onRomResult(false, line.substring(4))
@@ -160,6 +162,9 @@ class LinkClient(private val context: Context, private val listener: Listener) {
     fun queryGame() { if (running) outQueue.offer("GAME?") }
     fun openGameSettings() { if (running) outQueue.offer("CMD GAMEMENU") }
     fun openGlobalSettings() { if (running) outQueue.offer("CMD SETTINGS") }
+    fun netHost() { if (running) outQueue.offer("CMD NETHOST") }
+    fun netJoin(addr: String) { if (running) outQueue.offer("CMD NETJOIN $addr") }
+    fun queryNpAddr() { if (running) outQueue.offer("NPADDR?") }
     fun sendRom(name: String, size: Long, stream: InputStream) {
         if (running) outQueue.offer(RomJob(name, size, stream))
         else listener.onRomResult(false, "not connected")

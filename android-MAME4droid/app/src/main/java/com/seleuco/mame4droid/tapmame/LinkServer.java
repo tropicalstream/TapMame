@@ -215,9 +215,27 @@ public class LinkServer {
 						mm.runOnUiThread(() -> mm.getMainHelper().showSettings());
 						reply(out, "OK settings");
 						break;
+					case "NETHOST":
+						// start hosting with the stored mode; the phone then
+						// polls NPADDR? and turns the address into an invite code
+						mm.runOnUiThread(() -> mm.getNetPlay().createGame());
+						reply(out, "OK nethost");
+						break;
+					case "NETJOIN": {
+						final String addr = tk[2];
+						mm.runOnUiThread(() -> mm.getNetPlay().joinGame(addr));
+						reply(out, "OK netjoin");
+						break;
+					}
 					default:
 						reply(out, "ERR unknown cmd " + tk[1]);
 				}
+				break;
+			}
+			case "NPADDR?": {
+				String a = null;
+				try { a = Emulator.netplayGetPublicAddr(); } catch (Exception ignored) {}
+				reply(out, "NPADDR " + (a == null ? "" : a.replace('\n', '|')));
 				break;
 			}
 			case "ROM": {
@@ -256,13 +274,53 @@ public class LinkServer {
 				got += n;
 			}
 		}
-		if (got == size && tmp.renameTo(f)) {
+		if (got != size) {
+			//noinspection ResultOfMethodCallIgnored
+			tmp.delete();
+			reply(out, "ERR short transfer " + got + "/" + size);
+			return;
+		}
+		// zip romsets get an integrity pass before they're accepted: every
+		// entry is read through, so a truncated/corrupt download is caught
+		// here with a clear reason instead of a cryptic in-emulator failure.
+		// (Whether the CONTENTS match this MAME version is the emulator's
+		// audit — its report shows in-frame when the game is opened.)
+		if (name.toLowerCase().endsWith(".zip")) {
+			String zipErr = verifyZip(tmp);
+			if (zipErr != null) {
+				//noinspection ResultOfMethodCallIgnored
+				tmp.delete();
+				reply(out, "ERR " + name + " is not a valid zip (" + zipErr + ") — re-download the romset");
+				return;
+			}
+		}
+		if (tmp.renameTo(f)) {
 			reply(out, "OK " + name);
+			push("MSG ROM stored: " + name);
 			Log.i(TAG, "ROM stored: " + f + " (" + size + " bytes)");
 		} else {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();
-			reply(out, "ERR short transfer " + got + "/" + size);
+			reply(out, "ERR cannot write " + name);
+		}
+	}
+
+	/** Read every zip entry fully so CRC mismatches surface; null = OK. */
+	private static String verifyZip(File f) {
+		try (java.util.zip.ZipFile z = new java.util.zip.ZipFile(f)) {
+			byte[] buf = new byte[65536];
+			java.util.Enumeration<? extends java.util.zip.ZipEntry> en = z.entries();
+			int n = 0;
+			while (en.hasMoreElements()) {
+				java.util.zip.ZipEntry e = en.nextElement();
+				n++;
+				try (InputStream is = z.getInputStream(e)) {
+					while (is.read(buf) != -1) { /* CRC checked on stream end */ }
+				}
+			}
+			return n == 0 ? "empty archive" : null;
+		} catch (Exception e) {
+			return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
 		}
 	}
 
