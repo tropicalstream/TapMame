@@ -84,6 +84,8 @@ public class MAME4droid extends Activity {
 
 	protected InputView inputView = null;
 
+	protected com.seleuco.mame4droid.tapmame.LinkServer linkServer = null;
+
 	protected MainHelper mainHelper = null;
 	protected PrefsHelper prefsHelper = null;
 	protected DialogHelper dialogHelper = null;
@@ -169,6 +171,11 @@ public class MAME4droid extends Activity {
 		adpfHelper = new AdpfHelper(this);
 
 		inputHandler = new InputHandler(this);
+
+		// TapMame: LAN link for the companion phone app (controller, ROM
+		// push, game queries); announced via NSD as _tapmame._tcp
+		linkServer = new com.seleuco.mame4droid.tapmame.LinkServer(this);
+		linkServer.start();
 
 		mainHelper.detectDevice();
 
@@ -398,6 +405,8 @@ public class MAME4droid extends Activity {
 	protected void onDestroy() {
 		super.onDestroy();
 		Log.d("EMULATOR", "onDestroy " + this);
+
+		if (linkServer != null) { linkServer.stop(); linkServer = null; }
 
 		View frame = this.findViewById(R.id.EmulatorFrame);
 		if (frame != null)
