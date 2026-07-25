@@ -211,51 +211,84 @@ public class MainHelper {
         return res_dir;
     }
 
+    /** MAME's system_right_image tokens mapped to the folder each one reads. */
+    private static final String[][] ART_VIEW_DIRS = {
+        {"snap", "snap"},            {"cabinet", "cabinets"},
+        {"cpanel", "cpanel"},        {"pcb", "pcb"},
+        {"flyer", "flyers"},         {"title", "titles"},
+        {"ends", "ends"},            {"artpreview", "artpreview"},
+        {"bosses", "bosses"},        {"logo", "logo"},
+        {"versus", "versus"},        {"gameover", "gameover"},
+        {"howto", "howto"},          {"scores", "scores"},
+        {"select", "select"},        {"marquee", "marquees"},
+        {"cover", "covers"},
+    };
+
+    /** True when that view's folder actually holds at least one image. */
+    private boolean artViewHasContent(String token) {
+        for (String[] row : ART_VIEW_DIRS) {
+            if (!row[0].equals(token)) continue;
+            File d = new File(getInstallationDIR() + row[1]);
+            File[] fs = d.listFiles();
+            if (fs == null) return false;
+            for (File f : fs)
+                if (f.isFile() && f.length() > 0) return true;
+            return false;
+        }
+        return false;   // unknown token: treat as empty so we repoint it
+    }
+
     /**
-     * Point the game list's right-hand pane at Snapshots.
+     * Keep the game list's right-hand pane pointed at art that exists.
      * <p>
-     * MAME ships "cover" as the default for system_right_image, and nothing
-     * ever writes the covers/ folder — not MAME, not the scraper. So the pane
-     * reads "No image Available" beside every game no matter how much art has
-     * been downloaded, which looks exactly like a broken scraper. Snapshots is
-     * the one view the scraper always fills.
+     * MAME ships "cover" as the default for system_right_image and nothing ever
+     * writes the covers/ folder, so the pane reads "No image Available" beside
+     * every game however much art has been downloaded — indistinguishable from a
+     * broken scraper. Worse, the pane is not sticky: left/right in the game list
+     * cycles it, and MAME persists whatever it landed on when it exits. A
+     * one-shot fix therefore drifts straight back off snapshots.
      * <p>
-     * Done once, before the core boots (MAME rewrites ui.ini on exit, so a
-     * later edit would just be clobbered). If the player cycles the pane to
-     * something else afterwards, MAME persists that and we never touch it again.
+     * So this runs every boot and is self-correcting rather than forceful: if
+     * the selected view has images it is left alone — that is a real choice — and
+     * only a view whose folder is empty gets repointed at snapshots. Download
+     * marquees later and choosing the marquee pane will stick on its own.
+     * <p>
+     * Must run before the core boots; MAME rewrites ui.ini on exit and would
+     * clobber a later edit.
      */
     public void ensureArtViewDefault() {
-        if (mm.getPrefsHelper().getSharedPreferences()
-                .getBoolean(PrefsHelper.PREF_ART_VIEW_SEEDED, false))
-            return;
-
         File ini = new File(getInstallationDIR() + "ui.ini");
+        if (!ini.exists()) return;   // core writes it out with its defaults; we fix it next boot
+
         try {
-            if (ini.exists()) {
-                StringBuilder sb = new StringBuilder();
-                boolean seen = false;
-                BufferedReader r = new BufferedReader(new FileReader(ini));
-                String line;
-                while ((line = r.readLine()) != null) {
-                    if (line.trim().startsWith("system_right_image")) {
-                        sb.append("system_right_image        snap\n");
-                        seen = true;
-                    } else {
+            StringBuilder sb = new StringBuilder();
+            boolean changed = false, seen = false;
+            BufferedReader r = new BufferedReader(new FileReader(ini));
+            String line;
+            while ((line = r.readLine()) != null) {
+                String t = line.trim();
+                if (t.startsWith("system_right_image")) {
+                    seen = true;
+                    String[] parts = t.split("\\s+");
+                    String view = parts.length > 1 ? parts[1] : "";
+                    if (artViewHasContent(view)) {
                         sb.append(line).append('\n');
+                    } else {
+                        sb.append("system_right_image        snap\n");
+                        changed = true;
+                        Log.d("MAME4droid", "ui.ini: '" + view + "' pane is empty, back to snapshots");
                     }
+                } else {
+                    sb.append(line).append('\n');
                 }
-                r.close();
-                if (!seen) sb.append("system_right_image        snap\n");
-                FileWriter w = new FileWriter(ini, false);
-                w.write(sb.toString());
-                w.close();
-                Log.d("MAME4droid", "ui.ini: right pane set to snapshots");
             }
-            // Marked even when ui.ini is absent: the core writes it out with
-            // its own defaults on first exit, and retrying forever would keep
-            // stomping a choice the player may have made in between.
-            mm.getPrefsHelper().getSharedPreferences().edit()
-                .putBoolean(PrefsHelper.PREF_ART_VIEW_SEEDED, true).apply();
+            r.close();
+            if (!seen) { sb.append("system_right_image        snap\n"); changed = true; }
+            if (!changed) return;   // don't rewrite the file for nothing
+
+            FileWriter w = new FileWriter(ini, false);
+            w.write(sb.toString());
+            w.close();
         } catch (IOException e) {
             Log.w("MAME4droid", "ui.ini rewrite failed: " + e);
         }

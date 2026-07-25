@@ -99,8 +99,6 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	final static public String PREF_SCRAPE_ENABLED = "PREF_SCRAPE_ENABLED";
 	/** Marker for the one-time "art is on by default now" migration. */
 	final static public String PREF_SCRAPE_SEEDED = "PREF_SCRAPE_SEEDED";
-	/** Marker for the one-time "show snapshots, not covers" ui.ini fix. */
-	final static public String PREF_ART_VIEW_SEEDED = "PREF_ART_VIEW_SEEDED";
 	final static public String PREF_SCRAPE_ICONS = "PREF_SCRAPE_ICONS";
 	final static public String PREF_SCRAPE_SNAPSHOTS = "PREF_SCRAPE_SNAPSHOTS";
 	final static public String PREF_SCRAPE_ALL = "PREF_SCRAPE_ALL";
