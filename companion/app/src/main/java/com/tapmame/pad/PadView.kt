@@ -52,6 +52,7 @@ class PadView(
      *  was there, and the host clears it on a timer. */
     var noticeText = ""
         set(v) { field = v; postInvalidate() }
+    private var svcBottom = 0f
     /** Vibrate on control presses (toggle in the ⚙ menu). */
     var haptics = true
     /** What the pad currently drives on the glasses: game|frontend|android|menu. */
@@ -108,6 +109,7 @@ class PadView(
 
         // service strip along the top
         val svcH = if (portrait) h * 0.07f else h * 0.14f
+        svcBottom = svcH
         val gearW = svcH * 1.2f
         gearRect.set(14f, 10f, 14f + gearW, svcH)
         val left = gearRect.right + 12f
@@ -190,11 +192,6 @@ class PadView(
             text.textSize = minOf(width, height) * 0.03f; text.color = 0xFF7FA8CC.toInt()
             c.drawText(hint, width / 2f, hy, text)
         }
-        if (noticeText.isNotEmpty()) {
-            text.textSize = minOf(width, height) * 0.038f
-            text.color = 0xFFE8C660.toInt()
-            c.drawText(noticeText, width / 2f, height * 0.955f, text)
-        }
         text.textSize = minOf(width, height) * 0.032f; text.color = 0xFF9AA4AE.toInt()
         val line = buildString {
             append(statusText)
@@ -202,6 +199,21 @@ class PadView(
             if (profile.note.isNotEmpty()) append("  ·  ").append(profile.note)
         }
         c.drawText(line, width / 2f, height * 0.99f, text)
+
+        // Transient notice, directly under the COIN/START/EXIT/MENU row where
+        // the eye already is. Shrunk to fit rather than clipped, so a long
+        // romset name still reads on one line.
+        if (noticeText.isNotEmpty()) {
+            val avail = width - 28f
+            var size = minOf(width, height) * 0.040f
+            text.textSize = size
+            while (text.measureText(noticeText) > avail && size > 8f) {
+                size -= 1f
+                text.textSize = size
+            }
+            text.color = 0xFFE8C660.toInt()
+            c.drawText(noticeText, width / 2f, svcBottom + size + 14f, text)
+        }
 
         // gear
         panel(c, gearRect); text.textSize = gearRect.height() * 0.52f; text.color = Color.WHITE
