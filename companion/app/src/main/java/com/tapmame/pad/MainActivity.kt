@@ -12,7 +12,6 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.EditText
-import android.widget.Toast
 import kotlin.math.abs
 
 /**
@@ -285,9 +284,18 @@ class MainActivity : Activity(), LinkClient.Listener {
     // ---- one notice channel, so messages never queue up behind each other
     private val clearNotice = Runnable { pad.noticeText = "" }
 
-    /** Show a transient message for 8 seconds. A newer message REPLACES the
-     *  older one instead of waiting behind it (which is what left "topgunnr.zip
-     *  stored…" sitting on screen long after it was news). */
+    /** Show a transient message for 8 seconds, under the COIN/START/EXIT row.
+     *  A newer message REPLACES the older one instead of waiting behind it
+     *  (which is what left "topgunnr.zip stored…" on screen long after it was
+     *  news).
+     *
+     *  Use this for EVERY user-facing message — never Toast. Two reasons, and
+     *  we hit both: toasts queue, so several in a row leave the oldest stuck on
+     *  screen for many seconds; and since Android 11 they are drawn by SystemUI
+     *  on our behalf, so if this process dies while one is up, the window is
+     *  orphaned and sits there forever — surviving even a force-stop. This
+     *  notice is painted by PadView inside our own process and cannot outlive
+     *  it. */
     private fun notice(text: String) {
         runOnUiThread {
             pad.noticeText = text
@@ -333,30 +341,30 @@ class MainActivity : Activity(), LinkClient.Listener {
         runOnUiThread {
             if (ok) {
                 gamesDeleted = true
-                Toast.makeText(this, "Deleted $name", Toast.LENGTH_SHORT).show()
+                notice("Deleted $name")
                 manageGamesDialog()          // refresh the list so it shows it's gone
             } else {
-                Toast.makeText(this, "Delete failed: $msg", Toast.LENGTH_LONG).show()
+                notice("Delete failed: $msg")
             }
         }
     }
 
     private fun manageGamesDialog() {
         if (!link.isConnected) {
-            Toast.makeText(this, "Connect to the glasses first", Toast.LENGTH_SHORT).show(); return
+            notice("Connect to the glasses first"); return
         }
         romsWaiter = { list -> showManageGames(list) }
         link.queryRoms()
         // clear the waiter if the glasses never answer
         ui.postDelayed({
             if (romsWaiter != null) { romsWaiter = null
-                Toast.makeText(this, "No response from glasses", Toast.LENGTH_SHORT).show() }
+                notice("No response from glasses") }
         }, 5000)
     }
 
     private fun showManageGames(list: List<String>) {
         if (list.isEmpty()) {
-            Toast.makeText(this, "No games installed", Toast.LENGTH_SHORT).show()
+            notice("No games installed")
             reloadAfterManage(); return
         }
         AlertDialog.Builder(this)
@@ -425,7 +433,7 @@ class MainActivity : Activity(), LinkClient.Listener {
                     9 -> {
                         pad.haptics = !hap
                         getSharedPreferences("pad", MODE_PRIVATE).edit().putBoolean("haptics", pad.haptics).apply()
-                        Toast.makeText(this, "Haptics ${if (pad.haptics) "on" else "off"}", Toast.LENGTH_SHORT).show()
+                        notice("Haptics ${if (pad.haptics) "on" else "off"}")
                     }
                     10 -> ipDialog()
                     11 -> { link.disconnect(); link.startDiscovery() }
@@ -437,7 +445,7 @@ class MainActivity : Activity(), LinkClient.Listener {
 
     private fun netHostFlow() {
         link.netHost()
-        Toast.makeText(this, "Hosting… waiting for the public address", Toast.LENGTH_SHORT).show()
+        notice("Hosting… waiting for the public address")
         // poll the glasses until STUN/UPnP produced an address (max ~15s)
         var polls = 0
         npAddrWaiter = { addr -> showInvite(addr) }
@@ -447,7 +455,7 @@ class MainActivity : Activity(), LinkClient.Listener {
                 link.queryNpAddr()
                 if (++polls < 15) ui.postDelayed(this, 1000)
                 else { npAddrWaiter = null
-                    Toast.makeText(this@MainActivity, "No public address yet — open NetPlay on the glasses to see connection state", Toast.LENGTH_LONG).show() }
+                    notice("No public address yet — open NetPlay on the glasses to see connection state") }
             }
         }
         ui.postDelayed(poll, 1500)
@@ -479,8 +487,8 @@ class MainActivity : Activity(), LinkClient.Listener {
             .setView(et)
             .setPositiveButton("Join") { _, _ ->
                 val addr = InviteCode.decode(et.text.toString())
-                if (addr == null) Toast.makeText(this, "That code doesn't parse", Toast.LENGTH_LONG).show()
-                else { link.netJoin(addr); Toast.makeText(this, "Joining $addr…", Toast.LENGTH_SHORT).show() }
+                if (addr == null) notice("That code doesn't parse")
+                else { link.netJoin(addr); notice("Joining $addr…") }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -511,7 +519,7 @@ class MainActivity : Activity(), LinkClient.Listener {
     private fun nasBrowse(url: String) {
         val user = prefs().getString("user", "") ?: ""
         val pass = prefs().getString("pass", "") ?: ""
-        Toast.makeText(this, "Listing…", Toast.LENGTH_SHORT).show()
+        notice("Listing…")
         Thread {
             try {
                 val entries = Nas.list(url, user, pass)
@@ -535,14 +543,14 @@ class MainActivity : Activity(), LinkClient.Listener {
                         .show()
                 }
             } catch (ex: Exception) {
-                runOnUiThread { Toast.makeText(this, "NAS: ${ex.message}", Toast.LENGTH_LONG).show() }
+                runOnUiThread { notice("NAS: ${ex.message}") }
             }
         }.start()
     }
 
     private fun nasSend(url: String, name: String) {
         if (!name.lowercase().endsWith(".zip") && !name.lowercase().endsWith(".7z") && !name.lowercase().endsWith(".chd")) {
-            Toast.makeText(this, "Not a romset file (.zip/.7z/.chd)", Toast.LENGTH_LONG).show()
+            notice("Not a romset file (.zip/.7z/.chd)")
             return
         }
         val user = prefs().getString("user", "") ?: ""
@@ -553,7 +561,7 @@ class MainActivity : Activity(), LinkClient.Listener {
                 runOnUiThread { pad.statusText = "sending $name…" }
                 link.sendRom(name, size, stream)
             } catch (ex: Exception) {
-                runOnUiThread { Toast.makeText(this, "NAS read: ${ex.message}", Toast.LENGTH_LONG).show() }
+                runOnUiThread { notice("NAS read: ${ex.message}") }
             }
         }.start()
     }
@@ -597,9 +605,9 @@ class MainActivity : Activity(), LinkClient.Listener {
                 if (si >= 0) size = cur.getLong(si)
             }
         }
-        if (size <= 0) { Toast.makeText(this, "Cannot read file size", Toast.LENGTH_LONG).show(); return }
+        if (size <= 0) { notice("Cannot read file size"); return }
         val stream = contentResolver.openInputStream(uri)
-        if (stream == null) { Toast.makeText(this, "Cannot open file", Toast.LENGTH_LONG).show(); return }
+        if (stream == null) { notice("Cannot open file"); return }
         pad.statusText = "sending $name (${size / 1024} KB)…"
         lastRomUri = uri; lastRomName = name; romRetries = 0
         link.sendRom(name, size, stream)
