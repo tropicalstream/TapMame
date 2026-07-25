@@ -51,6 +51,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -208,6 +209,56 @@ public class MainHelper {
         mm.getPrefsHelper().setInstallationDIR(res_dir);
 
         return res_dir;
+    }
+
+    /**
+     * Point the game list's right-hand pane at Snapshots.
+     * <p>
+     * MAME ships "cover" as the default for system_right_image, and nothing
+     * ever writes the covers/ folder — not MAME, not the scraper. So the pane
+     * reads "No image Available" beside every game no matter how much art has
+     * been downloaded, which looks exactly like a broken scraper. Snapshots is
+     * the one view the scraper always fills.
+     * <p>
+     * Done once, before the core boots (MAME rewrites ui.ini on exit, so a
+     * later edit would just be clobbered). If the player cycles the pane to
+     * something else afterwards, MAME persists that and we never touch it again.
+     */
+    public void ensureArtViewDefault() {
+        if (mm.getPrefsHelper().getSharedPreferences()
+                .getBoolean(PrefsHelper.PREF_ART_VIEW_SEEDED, false))
+            return;
+
+        File ini = new File(getInstallationDIR() + "ui.ini");
+        try {
+            if (ini.exists()) {
+                StringBuilder sb = new StringBuilder();
+                boolean seen = false;
+                BufferedReader r = new BufferedReader(new FileReader(ini));
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.trim().startsWith("system_right_image")) {
+                        sb.append("system_right_image        snap\n");
+                        seen = true;
+                    } else {
+                        sb.append(line).append('\n');
+                    }
+                }
+                r.close();
+                if (!seen) sb.append("system_right_image        snap\n");
+                FileWriter w = new FileWriter(ini, false);
+                w.write(sb.toString());
+                w.close();
+                Log.d("MAME4droid", "ui.ini: right pane set to snapshots");
+            }
+            // Marked even when ui.ini is absent: the core writes it out with
+            // its own defaults on first exit, and retrying forever would keep
+            // stomping a choice the player may have made in between.
+            mm.getPrefsHelper().getSharedPreferences().edit()
+                .putBoolean(PrefsHelper.PREF_ART_VIEW_SEEDED, true).apply();
+        } catch (IOException e) {
+            Log.w("MAME4droid", "ui.ini rewrite failed: " + e);
+        }
     }
 
     public boolean ensureInstallationDIR(String dir) {

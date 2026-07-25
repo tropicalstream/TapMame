@@ -70,8 +70,15 @@ public class ScraperHelper implements Runnable {
 	private static int current = 0;
 
 	private static IScraper scraper = null;
+	private static String scraperDir = null;
     private static Thread scraperThread;
     private static final ArrayList<String> names = new ArrayList<>();
+
+	/** Pause/resume/stop are static state, so the worker has to wait on
+	 *  something equally static. Waiting on `this` meant a MAME4droid recreated
+	 *  by a rotation or a resume held a different monitor than the running
+	 *  thread, and neither notify() nor stop() ever reached it. */
+	private static final Object LOCK = new Object();
 
 	public static void reset(){
 		if(scraper!=null)
@@ -94,32 +101,83 @@ public class ScraperHelper implements Runnable {
 			return;
 		}
 
-        if (!isRunning) {
+		if (isRunning) return;
 
-			if(scraper==null) {
-				scraper = new ADBScraper(mm.getPrefsHelper().getInstallationDIR(),mm);
-			}
-            isRunning = true;
-			isPaused = false;
-			isStopped = false;
-			isScraping = false;
-			current =0;
-            ArrayList<String> fileNames = mm.getSAFHelper().getRomsFileNames();
-            for (String name : fileNames) {
-                if (name.toLowerCase().endsWith(".7z") || name.toLowerCase().endsWith(".zip"))
-                    names.add(name.substring(0, name.indexOf(".")));
-            }
-            scraperThread = new Thread(this);
-            scraperThread.start();
-        }
+		// Build the work list BEFORE latching isRunning. Upstream set the flag
+		// first and then walked a list that is null whenever SAF is unused, so
+		// the NPE left isRunning stuck true and every later call silently
+		// no-oped for the life of the process.
+		ArrayList<String> found = listRomsets();
+		if (found.isEmpty()) {
+			Log.d(TAG, "No romsets to scrape");
+			return;
+		}
+
+		// The scraper caches its output directory in a final field, so it has
+		// to be rebuilt if the install dir moved under us.
+		String dir = mm.getMainHelper().getInstallationDIR();
+		if (scraper == null || !dir.equals(scraperDir)) {
+			scraper = new ADBScraper(dir, mm);
+			scraperDir = dir;
+		} else {
+			scraper.setMAME4droid(mm);
+		}
+
+		isRunning = true;
+		isPaused = false;
+		isStopped = false;
+		isScraping = false;
+		current = 0;
+		names.clear();   // static list: without this a second run scrapes twice
+		names.addAll(found);
+		scraperThread = new Thread(this);
+		scraperThread.start();
     }
+
+	/**
+	 * Base names of every installed romset. Upstream asked SAFHelper
+	 * unconditionally, which hands back null when the user never picked a
+	 * document tree — and TapMame never does, because it keeps romsets in its
+	 * own files dir. That single line is why art never downloaded here.
+	 */
+	private ArrayList<String> listRomsets() {
+		ArrayList<String> out = new ArrayList<>();
+		ArrayList<String> files;
+
+		String romsDir = mm.getPrefsHelper().getROMsDIR();
+		if (romsDir != null && !romsDir.isEmpty()) {
+			files = mm.getSAFHelper().getRomsFileNames();
+			if (files == null) return out;
+		} else {
+			files = new ArrayList<>();
+			File[] fs = new File(mm.getMainHelper().getInstallationDIR() + "roms").listFiles();
+			if (fs == null) return out;
+			for (File f : fs)
+				if (f.isFile()) files.add(f.getName());
+		}
+
+		for (String name : files) {
+			String low = name.toLowerCase();
+			// .chd too — the ROM manager already accepts all three.
+			if (!low.endsWith(".zip") && !low.endsWith(".7z") && !low.endsWith(".chd"))
+				continue;
+			// lastIndexOf, not indexOf: "sf2.ce.zip" is a real romset filename
+			// and the first dot would truncate it to "sf2", scraping the wrong
+			// game and filing the art under the wrong name.
+			String base = name.substring(0, name.lastIndexOf('.'));
+			if (!base.isEmpty() && !out.contains(base)) out.add(base);
+		}
+		return out;
+	}
 
     @Override
     public void run() {
         Log.d(TAG, "Scraping starts");
+		int failures = 0;
+
         for (String name : names) {
 
-			File f = new File(mm.getPrefsHelper().getInstallationDIR());
+			File f = new File(mm.getMainHelper().getInstallationDIR());
 
 			long freeGB = f.getFreeSpace() / (1024*1024*1024);
 
@@ -136,9 +194,19 @@ public class ScraperHelper implements Runnable {
 
 			try {
 				scrapping = scraper.scrape(name, current);
+				failures = 0;
 			}catch (ScrapeException e) {
-				new WarnWidget.WarnWidgetHelper(mm, mm.getString(com.seleuco.mame4droid.R.string.scraping_error, e.getMessage()), 3, Color.RED, false);
-				break;
+				// Only the reachability probe throws. Scraping fires during
+				// emulator startup, when the glasses' Wi-Fi has often not
+				// associated yet — upstream abandoned the whole session on that
+				// first cold-radio failure. Give the radio time and try again.
+				if (++failures >= 4) {
+					new WarnWidget.WarnWidgetHelper(mm, mm.getString(com.seleuco.mame4droid.R.string.scraping_error, e.getMessage()), 3, Color.RED, false);
+					break;
+				}
+				Log.d(TAG, "ADB unreachable (" + failures + "), backing off: " + e.getMessage());
+				if (sleep(15000) || isStopped) break;
+				continue;
 			}
 
 			if(!ScraperHelper.isScraping && scrapping){
@@ -148,11 +216,11 @@ public class ScraperHelper implements Runnable {
 
 			current++;
 
-            synchronized(this) {
+            synchronized(LOCK) {
                 if (isPaused) {
                     try {
 						Log.d(TAG, "Scraping paused");
-                        wait();
+                        LOCK.wait();
 						Log.d(TAG, "Scraping resumed");
                     } catch (InterruptedException ignored) {}
                 }
@@ -162,6 +230,10 @@ public class ScraperHelper implements Runnable {
 				Log.d(TAG, "Scraping stopped");
 				break;
 			}
+
+			// A courtesy pause between romsets. arcadeitalia serves this for
+			// free and a full library is a few hundred requests back to back.
+			if (scrapping && sleep(300)) break;
         }
         isRunning = false;
 
@@ -171,26 +243,31 @@ public class ScraperHelper implements Runnable {
         Log.d(TAG, "Scraping ends");
     }
 
-    synchronized public void pause() {
+	/** Interruptible sleep. Returns true if the wait was cut short, which the
+	 *  caller treats as "give up now" — it only happens on shutdown. */
+	private static boolean sleep(long ms) {
+		try { Thread.sleep(ms); return false; }
+		catch (InterruptedException e) { Thread.currentThread().interrupt(); return true; }
+	}
+
+    public void pause() {
 		Log.d(TAG, "Scraping calling pause");
-        if(!isPaused && isRunning){
-            isPaused = true;
-        }
+		synchronized (LOCK) {
+			if (!isPaused && isRunning) isPaused = true;
+		}
     }
 
-    synchronized public void resume() {
+    public void resume() {
 		Log.d(TAG, "Scraping calling resume");
-        if(isPaused && isRunning){
-			isPaused = false;
-            notify();
-        }
+		synchronized (LOCK) {
+			if (isPaused && isRunning) { isPaused = false; LOCK.notifyAll(); }
+		}
     }
 
-	synchronized public void stop() {
+	public void stop() {
 		Log.d(TAG, "Scraping calling stop");
-		if(isRunning){
-			isStopped = true;
-			notify();
+		synchronized (LOCK) {
+			if (isRunning) { isStopped = true; isPaused = false; LOCK.notifyAll(); }
 		}
 	}
 

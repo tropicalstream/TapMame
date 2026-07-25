@@ -776,7 +776,7 @@
 			android:title="@string/prefscr_scrape_title">
 
 			<com.seleuco.mame4droid.prefs.CheckBoxPrefWithWarn
-				android:defaultValue="false"
+				android:defaultValue="true"
 				android:key="PREF_SCRAPE_ENABLED"
 				android:summary="@string/pref_scrape_enabled_summary"
 				android:title="@string/pref_scrape_enabled_title" />

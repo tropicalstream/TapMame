@@ -97,6 +97,10 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	final static public String PREF_SHADER_EFFECT = "PREF_SHADER_EFFECT_3";
 
 	final static public String PREF_SCRAPE_ENABLED = "PREF_SCRAPE_ENABLED";
+	/** Marker for the one-time "art is on by default now" migration. */
+	final static public String PREF_SCRAPE_SEEDED = "PREF_SCRAPE_SEEDED";
+	/** Marker for the one-time "show snapshots, not covers" ui.ini fix. */
+	final static public String PREF_ART_VIEW_SEEDED = "PREF_ART_VIEW_SEEDED";
 	final static public String PREF_SCRAPE_ICONS = "PREF_SCRAPE_ICONS";
 	final static public String PREF_SCRAPE_SNAPSHOTS = "PREF_SCRAPE_SNAPSHOTS";
 	final static public String PREF_SCRAPE_ALL = "PREF_SCRAPE_ALL";
@@ -269,6 +273,17 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 				&& !am.isLowRamDevice();
 			if (e == null) e = p.edit();
 			e.putBoolean(PREF_SHADERS_ENABLED, gl3);
+		}
+
+		// Game art defaults on now, but flipping the code default alone does
+		// nothing for anyone who already ran the app: the preference screen had
+		// persisted the old "false" to disk, so the getter never sees the new
+		// default. Turn it on once, keyed on a marker so a deliberate later
+		// "off" is respected and never silently re-enabled.
+		if (!p.contains(PREF_SCRAPE_SEEDED)) {
+			if (e == null) e = p.edit();
+			e.putBoolean(PREF_SCRAPE_SEEDED, true);
+			e.putBoolean(PREF_SCRAPE_ENABLED, true);
 		}
 
 		if (e != null) e.apply();
@@ -837,7 +852,10 @@ public class PrefsHelper implements OnSharedPreferenceChangeListener {
 	}
 
 	public boolean isScrapingEnabled() {
-		return getSharedPreferences().getBoolean(PREF_SCRAPE_ENABLED, false);
+		// On by default here. Art makes the game list readable at a glance,
+		// which matters far more on the glasses than it does on a phone, and
+		// the fetch is a few hundred KB per romset that is cached forever.
+		return getSharedPreferences().getBoolean(PREF_SCRAPE_ENABLED, true);
 	}
 
 	public boolean isScrapingIcons() {

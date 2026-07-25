@@ -232,7 +232,13 @@ public class ADBScraper implements IScraper {
 			Log.d(TAG, "scraping: " + rom_name);
 
 			String json_query = mm.getPrefsHelper().isScrapingAll() ? ADB_QUERY_FULL_URL : ADB_QUERY_MAME_URL;
-			String json = getJSON(json_query + "&game_name=" + rom_name, TIMEOUT);
+			String encoded;
+			try {
+				encoded = java.net.URLEncoder.encode(rom_name, "UTF-8");
+			} catch (java.io.UnsupportedEncodingException e) {
+				encoded = rom_name;
+			}
+			String json = getJSON(json_query + "&game_name=" + encoded, TIMEOUT);
 			Log.d(TAG, "json: " + json);
 
 			if (json == null) {
@@ -323,7 +329,8 @@ public class ADBScraper implements IScraper {
 	@Override
 	public boolean reset() {
 
-		/*
+		// Was commented out upstream, which made "reset scrape data" a no-op:
+		// the sidecars survived and permanently suppressed every retry.
 		Log.d(TAG, "Deleting properties...");
 		String propsDir = scrapeDir + DIR_PROPERTIES;
 		File f = new File(propsDir);
@@ -333,7 +340,7 @@ public class ADBScraper implements IScraper {
 				f2.delete();
 			}
 		}
-		*/
+		scraping = false;
 		return true;
 	}
 
@@ -454,8 +461,11 @@ public class ADBScraper implements IScraper {
 		String fileName = name + "." + fileType;
 		File file = new File(dir + File.separator + fileName);
 		if(url == null) {
+			// Returning true here would record "done" in the sidecar and this
+			// image would never be looked for again — including art the
+			// database gains later. Report a miss so a future run retries.
 			Log.d(TAG, "Theres not url image: " + fileName +" ("+folder+")");
-			return true;
+			return false;
 		}
 		if(file.exists()){
 			Log.d(TAG, "Already exists: " + fileName);
@@ -489,15 +499,35 @@ public class ADBScraper implements IScraper {
                     if(fileName==null)
                     */
 
+					// Download to a .part and rename only once the stream ends
+					// cleanly. Writing straight to the final name meant a
+					// dropped connection left a half-image on disk that the
+					// exists() check above then treated as complete forever.
 					InputStream input = c.getInputStream();
 					byte[] buffer = new byte[4096];
 					int n;
+					long got = 0;
 					Files.createDirectories(Paths.get(dir));
-					OutputStream output = new FileOutputStream(file);
-					while ((n = input.read(buffer)) != -1) {
-						output.write(buffer, 0, n);
+					File part = new File(dir + File.separator + fileName + ".part");
+					OutputStream output = new FileOutputStream(part);
+					try {
+						while ((n = input.read(buffer)) != -1) {
+							output.write(buffer, 0, n);
+							got += n;
+						}
+					} finally {
+						output.close();
 					}
-					output.close();
+					int expected = c.getContentLength();
+					if (got == 0 || (expected >= 0 && got != expected)) {
+						Log.e(TAG, "Short read " + got + "/" + expected + ": " + fileName);
+						part.delete();
+						return false;
+					}
+					if (!part.renameTo(file)) {
+						part.delete();
+						return false;
+					}
 					return true;
 			}
 

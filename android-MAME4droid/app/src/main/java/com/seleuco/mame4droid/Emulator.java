@@ -886,9 +886,15 @@ public class Emulator {
 						mm.getSAFHelper().initLazy();
 					else
 						mm.getSAFHelper().listUriFiles(false);
-					if(mm.getPrefsHelper().isScrapingEnabled())
-						mm.getScraperHelper().initMediaScrap();
 				}
+
+				// Game art is fetched for both storage layouts. Upstream only
+				// kicked this off inside the SAF branch above, so on TapMame —
+				// which keeps romsets in its own files dir and never asks for a
+				// SAF tree — the scraper had literally never run once.
+				mm.getMainHelper().ensureArtViewDefault();
+				if (mm.getPrefsHelper().isScrapingEnabled())
+					mm.getScraperHelper().initMediaScrap();
 
 				//Uri pkg = null;
 				String fileName = null;

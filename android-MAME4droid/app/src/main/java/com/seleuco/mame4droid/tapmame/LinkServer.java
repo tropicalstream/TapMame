@@ -611,6 +611,19 @@ public class LinkServer {
 				? name + " stored — after your game, use Reload game list to load it."
 				: name + " stored — tap Reload game list to load it now.";
 			push("MSG " + how);
+
+			// Fetch this game's art now rather than at the next boot, so the
+			// cabinet shot is already waiting when the list does come back.
+			// The scraper rescans the roms folder and skips what it has.
+			// (We are already off the UI thread here, and initMediaScrap only
+			// lists the folder before handing off to its own worker.)
+			if (mm.getPrefsHelper().isScrapingEnabled()) {
+				try {
+					mm.getScraperHelper().initMediaScrap();
+				} catch (Exception ex) {
+					Log.w(TAG, "scrape kick failed: " + ex);
+				}
+			}
 		} else {
 			//noinspection ResultOfMethodCallIgnored
 			tmp.delete();
