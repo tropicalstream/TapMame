@@ -7,3 +7,4 @@ android-MAME4droid/.gradle/
 companion/local.properties
 companion/app/build/
 companion/.gradle/
+*.DS_Store
