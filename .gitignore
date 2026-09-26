@@ -8,3 +8,4 @@ companion/local.properties
 companion/app/build/
 companion/.gradle/
 *.DS_Store
+TapMame.apk
